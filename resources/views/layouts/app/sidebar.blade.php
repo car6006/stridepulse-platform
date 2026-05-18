@@ -15,20 +15,22 @@
                     <flux:sidebar.item icon="home" :href="route('dashboard')" :current="request()->routeIs('dashboard')" wire:navigate>
                         {{ __('Dashboard') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="layout-grid" :href="route('athletes.index')" :current="request()->routeIs('athletes.*')" wire:navigate>
+                        {{ __('Athletes') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="layout-grid" :href="route('garmin-setup.index')" :current="request()->routeIs('garmin-setup.*')" wire:navigate>
+                        {{ __('Garmin setup') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="layout-grid" :href="route('tracking-sessions.create')" :current="request()->routeIs('tracking-sessions.*')" wire:navigate>
+                        {{ __('Start session') }}
+                    </flux:sidebar.item>
+                    <flux:sidebar.item icon="layout-grid" :href="route('live-sessions.index')" :current="request()->routeIs('live-sessions.*')" wire:navigate>
+                        {{ __('Live sessions') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
             </flux:sidebar.nav>
 
             <flux:spacer />
-
-            <flux:sidebar.nav>
-                <flux:sidebar.item icon="folder-git-2" href="https://github.com/laravel/livewire-starter-kit" target="_blank">
-                    {{ __('Repository') }}
-                </flux:sidebar.item>
-
-                <flux:sidebar.item icon="book-open-text" href="https://laravel.com/docs/starter-kits#livewire" target="_blank">
-                    {{ __('Documentation') }}
-                </flux:sidebar.item>
-            </flux:sidebar.nav>
 
             <x-desktop-user-menu class="hidden lg:block" :name="auth()->user()->name" />
         </flux:sidebar>

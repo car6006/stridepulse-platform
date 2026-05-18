@@ -37,23 +37,17 @@
                 </div>
 
                 <div class="flex flex-wrap gap-3">
-                    <flux:button variant="filled" type="button" disabled>
+                    <flux:button variant="filled" :href="route('athletes.create')" wire:navigate>
                         {{ __('Create athlete') }}
                     </flux:button>
 
-                    <flux:button variant="primary" type="button" disabled>
+                    <flux:button variant="primary" :href="route('tracking-sessions.create')" wire:navigate>
                         {{ __('Start tracking session') }}
                     </flux:button>
 
-                    @if ($latestLiveSession)
-                        <flux:button :href="route('live.session', $latestLiveSession->session_token)" wire:navigate>
-                            {{ __('View live sessions') }}
-                        </flux:button>
-                    @else
-                        <flux:button type="button" disabled>
-                            {{ __('View live sessions') }}
-                        </flux:button>
-                    @endif
+                    <flux:button :href="route('live-sessions.index')" wire:navigate>
+                        {{ __('View live sessions') }}
+                    </flux:button>
                 </div>
             </div>
         </section>

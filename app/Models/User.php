@@ -43,4 +43,15 @@ class User extends Authenticatable
             ->map(fn ($word) => Str::substr($word, 0, 1))
             ->implode('');
     }
+
+    // Relationships for StridePulse
+    public function athlete()
+    {
+        return $this->hasOne(Athlete::class);
+    }
+
+    public function coach()
+    {
+        return $this->hasOne(Coach::class);
+    }
 }

@@ -1,8 +1,10 @@
 <?php
 
+use App\Http\Controllers\LiveSessionController;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
+Route::get('/live/{session_token}', [LiveSessionController::class, 'show'])->name('live.session');
 
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');

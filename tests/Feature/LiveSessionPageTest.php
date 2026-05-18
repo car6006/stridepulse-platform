@@ -1,0 +1,78 @@
+<?php
+
+use App\Models\Athlete;
+use App\Models\Sport;
+use App\Models\TelemetryPoint;
+use App\Models\TrackingSession;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
+
+test('live session page renders session status and athlete', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Casey Runner']);
+    $sport = Sport::factory()->create(['name' => 'Run']);
+    $session = TrackingSession::factory()
+        ->for($athlete)
+        ->for($sport)
+        ->create([
+            'status' => 'active',
+            'last_seen_at' => now(),
+        ]);
+
+    $this->get("/live/{$session->session_token}")
+        ->assertOk()
+        ->assertSee('StridePulse Live')
+        ->assertSee('Casey Runner')
+        ->assertSee('active')
+        ->assertSee('Last seen');
+});
+
+test('live session page shows latest telemetry summary', function () {
+    $session = TrackingSession::factory()->create();
+
+    TelemetryPoint::factory()->for($session, 'trackingSession')->create([
+        'recorded_at' => now()->subMinute(),
+        'distance_m' => 1000,
+        'heart_rate_bpm' => 130,
+    ]);
+
+    TelemetryPoint::factory()->for($session, 'trackingSession')->create([
+        'recorded_at' => now(),
+        'distance_m' => 5250,
+        'pace_sec_per_km' => 304,
+        'heart_rate_bpm' => 151,
+        'cadence' => 176,
+        'gps_status' => 'LOCK',
+        'battery_percent' => 82,
+        'latitude' => -33.9249,
+        'longitude' => 18.4241,
+    ]);
+
+    $this->get("/live/{$session->session_token}")
+        ->assertOk()
+        ->assertSee('5.25')
+        ->assertSee('5:04 /km')
+        ->assertSee('151')
+        ->assertSee('176')
+        ->assertSee('LOCK')
+        ->assertSee('82%')
+        ->assertSee('Location received')
+        ->assertSee('-33.9249000')
+        ->assertSee('18.4241000');
+});
+
+test('live session page shows livetrack link when available', function () {
+    $session = TrackingSession::factory()->create([
+        'livetrack_url' => 'https://livetrack.garmin.com/session/example',
+    ]);
+
+    $this->get("/live/{$session->session_token}")
+        ->assertOk()
+        ->assertSee('Garmin LiveTrack')
+        ->assertSee('Open LiveTrack')
+        ->assertSee('https://livetrack.garmin.com/session/example');
+});
+
+test('live session page returns 404 for invalid token', function () {
+    $this->get('/live/not-a-real-token')->assertNotFound();
+});

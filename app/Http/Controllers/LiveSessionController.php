@@ -36,6 +36,8 @@ class LiveSessionController extends Controller
             'trackingSession' => $trackingSession,
             'latestTelemetry' => $latestTelemetry,
             'breadcrumbTrail' => $breadcrumbTrail,
+            'mapProvider' => config('maps.provider', 'maplibre'),
+            'mapStyleUrl' => config('maps.style_url'),
         ]);
     }
 }

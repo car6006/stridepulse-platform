@@ -62,6 +62,10 @@
             integrity="sha256-p4NxAoJBhIINfQPD9eMQpQmHTVwRIsjD5fEnwV1b3r0="
             crossorigin=""
         >
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css"
+        >
         <style>
             :root {
                 color-scheme: light;
@@ -196,20 +200,36 @@
                 min-height: 220px;
                 border-radius: 8px;
                 border: 1px solid #cbd5e1;
-                background:
-                    linear-gradient(90deg, rgba(15, 118, 110, 0.08) 1px, transparent 1px),
-                    linear-gradient(rgba(15, 118, 110, 0.08) 1px, transparent 1px),
-                    #eef7f4;
+                background: #dce8ee;
                 background-size: 28px 28px;
                 color: #24463f;
                 text-align: center;
                 padding: 16px;
+                position: relative;
             }
 
             #live-map {
                 min-height: 360px;
                 padding: 0;
                 overflow: hidden;
+                text-align: left;
+            }
+
+            #live-map::after {
+                content: "";
+                pointer-events: none;
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(180deg, rgba(15, 23, 42, 0.04), rgba(15, 23, 42, 0));
+                z-index: 1;
+            }
+
+            .map-loading {
+                min-height: 360px;
+                display: grid;
+                place-items: center;
+                padding: 16px;
+                text-align: center;
             }
 
             .map-empty {
@@ -221,17 +241,32 @@
 
             .athlete-marker {
                 align-items: center;
-                background: #0f766e;
+                background: #00a3ff;
                 border: 3px solid #ffffff;
                 border-radius: 999px;
-                box-shadow: 0 4px 12px rgba(15, 23, 42, 0.28);
+                box-shadow: 0 10px 24px rgba(0, 91, 150, 0.34), 0 0 0 8px rgba(0, 163, 255, 0.16);
                 color: #ffffff;
                 display: flex;
                 font-size: 13px;
                 font-weight: 800;
-                height: 28px;
+                height: 30px;
                 justify-content: center;
-                width: 28px;
+                transform: translateZ(0);
+                transition: transform 400ms ease;
+                width: 30px;
+            }
+
+            .athlete-marker::after {
+                content: "";
+                width: 8px;
+                height: 8px;
+                border-radius: 999px;
+                background: #ffffff;
+            }
+
+            .maplibregl-ctrl-attrib,
+            .leaflet-control-attribution {
+                font-size: 10px;
             }
 
             .link {
@@ -388,6 +423,12 @@
                     <p class="label">Map</p>
                     <div id="live-map" class="map">
                         @if ($hasLocation)
+                            <div class="map-loading" id="map-loading">
+                                <div>
+                                    <strong>Loading live map</strong>
+                                    <p class="subvalue">Rendering athlete position and breadcrumb trail.</p>
+                                </div>
+                            </div>
                             <noscript>
                                 <div class="map-empty">
                                     <div>
@@ -424,6 +465,7 @@
             </section>
         </main>
         @if ($hasLocation)
+            <script src="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.js"></script>
             <script
                 src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
                 integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
@@ -432,35 +474,159 @@
             <script>
                 const center = @json($mapCenter);
                 const trail = @json($trailPoints);
-                const map = L.map('live-map', {
-                    scrollWheelZoom: false,
-                }).setView(center, 15);
+                const mapProvider = @json($mapProvider ?? 'maplibre');
+                const mapStyleUrl = @json($mapStyleUrl ?? 'https://tiles.openfreemap.org/styles/liberty');
+                const mapElement = document.getElementById('live-map');
+                const coordinates = trail.map((point) => [Number(point.lng), Number(point.lat)]);
+                const latestCoordinate = [Number(center[1]), Number(center[0])];
+                let fallbackStarted = false;
+                let maplibreLoaded = false;
 
-                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                    attribution: '&copy; OpenStreetMap contributors',
-                    maxZoom: 19,
-                }).addTo(map);
-
-                const markerIcon = L.divIcon({
-                    className: '',
-                    html: '<div class="athlete-marker">●</div>',
-                    iconAnchor: [14, 14],
-                    iconSize: [28, 28],
-                });
-
-                const latLngs = trail.map((point) => [point.lat, point.lng]);
-                if (latLngs.length > 1) {
-                    L.polyline(latLngs, {
-                        color: '#0f766e',
-                        opacity: 0.85,
-                        weight: 4,
-                    }).addTo(map);
-                    map.fitBounds(latLngs, { padding: [28, 28], maxZoom: 16 });
+                function resetMapContainer() {
+                    mapElement.innerHTML = '';
                 }
 
-                L.marker(center, { icon: markerIcon })
-                    .addTo(map)
-                    .bindPopup('Latest Garmin telemetry');
+                function athleteMarkerElement() {
+                    const marker = document.createElement('div');
+                    marker.className = 'athlete-marker';
+                    marker.setAttribute('aria-label', 'Athlete current position');
+                    return marker;
+                }
+
+                function boundsForMapLibre(points) {
+                    const bounds = new maplibregl.LngLatBounds(points[0], points[0]);
+                    points.forEach((point) => bounds.extend(point));
+                    return bounds;
+                }
+
+                function initMapLibre() {
+                    if (mapProvider !== 'maplibre' || !window.maplibregl || !mapStyleUrl) {
+                        throw new Error('MapLibre unavailable');
+                    }
+
+                    resetMapContainer();
+
+                    const map = new maplibregl.Map({
+                        container: 'live-map',
+                        style: mapStyleUrl,
+                        center: latestCoordinate,
+                        zoom: 15,
+                        attributionControl: false,
+                    });
+
+                    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+                    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-right');
+
+                    map.once('load', () => {
+                        maplibreLoaded = true;
+
+                        map.addSource('route', {
+                            type: 'geojson',
+                            data: {
+                                type: 'Feature',
+                                geometry: {
+                                    type: 'LineString',
+                                    coordinates: coordinates.length > 1 ? coordinates : [latestCoordinate],
+                                },
+                                properties: {},
+                            },
+                        });
+
+                        map.addLayer({
+                            id: 'route-casing',
+                            type: 'line',
+                            source: 'route',
+                            paint: {
+                                'line-color': '#ffffff',
+                                'line-opacity': 0.9,
+                                'line-width': 8,
+                            },
+                        });
+
+                        map.addLayer({
+                            id: 'route-line',
+                            type: 'line',
+                            source: 'route',
+                            paint: {
+                                'line-color': '#00a3ff',
+                                'line-opacity': 0.95,
+                                'line-width': 4,
+                            },
+                        });
+
+                        new maplibregl.Marker({ element: athleteMarkerElement(), anchor: 'center' })
+                            .setLngLat(latestCoordinate)
+                            .setPopup(new maplibregl.Popup({ offset: 18 }).setText('Latest Garmin telemetry'))
+                            .addTo(map);
+
+                        if (coordinates.length > 1) {
+                            map.fitBounds(boundsForMapLibre(coordinates), {
+                                padding: 44,
+                                maxZoom: 16,
+                                duration: 900,
+                            });
+                        } else {
+                            map.easeTo({ center: latestCoordinate, zoom: 15, duration: 700 });
+                        }
+                    });
+
+                    map.once('error', () => {
+                        if (!maplibreLoaded) {
+                            initLeafletFallback();
+                        }
+                    });
+
+                    window.setTimeout(() => {
+                        if (!maplibreLoaded) {
+                            initLeafletFallback();
+                        }
+                    }, 4500);
+                }
+
+                function initLeafletFallback() {
+                    if (fallbackStarted || !window.L) {
+                        return;
+                    }
+
+                    fallbackStarted = true;
+                    resetMapContainer();
+
+                    const map = L.map('live-map', {
+                        scrollWheelZoom: false,
+                    }).setView(center, 15);
+
+                    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                        attribution: '&copy; OpenStreetMap contributors',
+                        maxZoom: 19,
+                    }).addTo(map);
+
+                    const markerIcon = L.divIcon({
+                        className: '',
+                        html: '<div class="athlete-marker"></div>',
+                        iconAnchor: [15, 15],
+                        iconSize: [30, 30],
+                    });
+
+                    const latLngs = trail.map((point) => [point.lat, point.lng]);
+                    if (latLngs.length > 1) {
+                        L.polyline(latLngs, {
+                            color: '#00a3ff',
+                            opacity: 0.92,
+                            weight: 5,
+                        }).addTo(map);
+                        map.fitBounds(latLngs, { padding: [32, 32], maxZoom: 16 });
+                    }
+
+                    L.marker(center, { icon: markerIcon })
+                        .addTo(map)
+                        .bindPopup('Latest Garmin telemetry');
+                }
+
+                try {
+                    initMapLibre();
+                } catch (error) {
+                    initLeafletFallback();
+                }
             </script>
         @endif
     </body>

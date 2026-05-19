@@ -90,30 +90,52 @@ class GarminTelemetryController extends Controller
             }
         }
 
+        // Normalize/cap ascent/descent values (ignore or nullify if unrealistic)
+        $ascent = $validated['ascent_m'] ?? null;
+        $descent = $validated['descent_m'] ?? null;
+        $ascent = (is_numeric($ascent) && $ascent >= 0 && $ascent < 10000) ? $ascent : null;
+        $descent = (is_numeric($descent) && $descent >= 0 && $descent < 10000) ? $descent : null;
+
+        // Normalize altitude, heading, average pace, elapsed time, device model (optional fields)
+        $altitude = $validated['altitude_m'] ?? null;
+        $altitude = (is_numeric($altitude) && abs($altitude) < 10000) ? $altitude : null;
+
+        $heading = $validated['heading_degrees'] ?? null;
+        $heading = (is_numeric($heading) && $heading >= 0 && $heading <= 360) ? $heading : null;
+
+        $averagePace = $validated['average_pace_sec_per_km'] ?? null;
+        $averagePace = (is_numeric($averagePace) && $averagePace > 0 && $averagePace < 3600) ? $averagePace : null;
+
+        $elapsedTime = $validated['elapsed_time_seconds'] ?? null;
+        $elapsedTime = (is_numeric($elapsedTime) && $elapsedTime >= 0 && $elapsedTime < 86400) ? $elapsedTime : null;
+
+        $deviceModel = $validated['device_model'] ?? null;
+        $deviceModel = (is_string($deviceModel) && strlen($deviceModel) <= 255) ? $deviceModel : null;
+
         TelemetryPoint::query()->create([
             'tracking_session_id' => $trackingSession->id,
             'ingestion_id' => $validated['ingestion_id'] ?? null,
             'recorded_at' => Carbon::parse($validated['recorded_at']),
             'elapsed_seconds' => $validated['elapsed_seconds'] ?? null,
-            'elapsed_time_seconds' => $validated['elapsed_time_seconds'] ?? null,
+            'elapsed_time_seconds' => $elapsedTime,
             'distance_m' => $validated['distance_m'] ?? null,
             'pace_sec_per_km' => $validated['pace_sec_per_km'] ?? null,
-            'average_pace_sec_per_km' => $validated['average_pace_sec_per_km'] ?? null,
+            'average_pace_sec_per_km' => $averagePace,
             'current_speed_mps' => $validated['current_speed_mps'] ?? null,
             'heart_rate_bpm' => $validated['heart_rate_bpm'] ?? null,
             'avg_heart_rate_bpm' => $validated['avg_heart_rate_bpm'] ?? null,
             'cadence' => $validated['cadence'] ?? null,
             'latitude' => $validated['latitude'] ?? null,
             'longitude' => $validated['longitude'] ?? null,
-            'altitude_m' => $validated['altitude_m'] ?? null,
-            'heading_degrees' => $validated['heading_degrees'] ?? null,
-            'ascent_m' => $validated['ascent_m'] ?? null,
-            'descent_m' => $validated['descent_m'] ?? null,
+            'altitude_m' => $altitude,
+            'heading_degrees' => $heading,
+            'ascent_m' => $ascent,
+            'descent_m' => $descent,
             'calories' => $validated['calories'] ?? null,
             'lap_number' => $validated['lap_number'] ?? null,
             'gps_status' => $validated['gps_status'] ?? null,
             'battery_percent' => $validated['battery_percent'] ?? null,
-            'device_model' => $validated['device_model'] ?? null,
+            'device_model' => $deviceModel,
             'raw_payload' => $request->all(),
             'metadata' => [],
         ]);

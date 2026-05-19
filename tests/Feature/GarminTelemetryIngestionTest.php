@@ -1,3 +1,84 @@
+test('optional telemetry fields can be null', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $payload = garminTelemetryPayload([
+        'altitude_m' => null,
+        'heading_degrees' => null,
+        'average_pace_sec_per_km' => null,
+        'ascent_m' => null,
+        'descent_m' => null,
+        'elapsed_time_seconds' => null,
+        'device_model' => null,
+    ]);
+
+    $response = $this->postJson('/api/garmin/telemetry', $payload);
+    $response->assertOk();
+    $point = TelemetryPoint::query()->firstOrFail();
+    expect($point->altitude_m)->toBeNull()
+        ->and($point->heading_degrees)->toBeNull()
+        ->and($point->average_pace_sec_per_km)->toBeNull()
+        ->and($point->ascent_m)->toBeNull()
+        ->and($point->descent_m)->toBeNull()
+        ->and($point->elapsed_time_seconds)->toBeNull()
+        ->and($point->device_model)->toBeNull();
+});
+
+test('unrealistic ascent/descent are ignored', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $payload = garminTelemetryPayload([
+        'ascent_m' => 999999,
+        'descent_m' => -100,
+    ]);
+
+    $response = $this->postJson('/api/garmin/telemetry', $payload);
+    $response->assertOk();
+    $point = TelemetryPoint::query()->firstOrFail();
+    expect($point->ascent_m)->toBeNull()
+        ->and($point->descent_m)->toBeNull();
+});
+
+test('required fields are enforced', function () {
+    $response = $this->postJson('/api/garmin/telemetry', [
+        // missing session_token and recorded_at
+    ]);
+    $response->assertStatus(422);
+    $response->assertJsonValidationErrors(['session_token', 'recorded_at']);
+});
+
+test('successful ingestion with edge values', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $payload = garminTelemetryPayload([
+        'ascent_m' => 9999.99,
+        'descent_m' => 0,
+        'altitude_m' => 8848,
+        'heading_degrees' => 360,
+        'average_pace_sec_per_km' => 3599,
+        'elapsed_time_seconds' => 86399,
+        'device_model' => str_repeat('a', 255),
+    ]);
+
+    $response = $this->postJson('/api/garmin/telemetry', $payload);
+    $response->assertOk();
+    $point = TelemetryPoint::query()->firstOrFail();
+    expect((float) $point->ascent_m)->toBe(9999.99)
+        ->and((float) $point->descent_m)->toBe(0.0)
+        ->and((float) $point->altitude_m)->toBe(8848.0)
+        ->and((float) $point->heading_degrees)->toBe(360.0)
+        ->and((int) $point->average_pace_sec_per_km)->toBe(3599)
+        ->and((int) $point->elapsed_time_seconds)->toBe(86399)
+        ->and($point->device_model)->toBe(str_repeat('a', 255));
+});
 <?php
 
 use App\Models\TelemetryPoint;

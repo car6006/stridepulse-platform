@@ -15,6 +15,11 @@ class TelemetryPoint extends Model
         'distance_m' => 'decimal:2',
         'latitude' => 'decimal:7',
         'longitude' => 'decimal:7',
+        'altitude_m' => 'decimal:2',
+        'heading_degrees' => 'decimal:2',
+        'ascent_m' => 'decimal:2',
+        'descent_m' => 'decimal:2',
+        'current_speed_mps' => 'decimal:3',
     ];
     public function trackingSession() { return $this->belongsTo(TrackingSession::class); }
 }

@@ -10,8 +10,34 @@
         $pace = sprintf('%d:%02d /km', $minutes, $seconds);
     }
 
+    $averagePace = '--';
+    if ($latestTelemetry?->average_pace_sec_per_km !== null) {
+        $minutes = intdiv((int) $latestTelemetry->average_pace_sec_per_km, 60);
+        $seconds = ((int) $latestTelemetry->average_pace_sec_per_km) % 60;
+        $averagePace = sprintf('%d:%02d /km', $minutes, $seconds);
+    }
+
+    $elapsedTime = '--';
+    $elapsedSeconds = $latestTelemetry?->elapsed_time_seconds ?? $latestTelemetry?->elapsed_seconds;
+    if ($elapsedSeconds !== null) {
+        $hours = intdiv((int) $elapsedSeconds, 3600);
+        $minutes = intdiv(((int) $elapsedSeconds) % 3600, 60);
+        $seconds = ((int) $elapsedSeconds) % 60;
+        $elapsedTime = $hours > 0
+            ? sprintf('%d:%02d:%02d', $hours, $minutes, $seconds)
+            : sprintf('%d:%02d', $minutes, $seconds);
+    }
+
+    $currentSpeed = $latestTelemetry?->current_speed_mps !== null
+        ? number_format(((float) $latestTelemetry->current_speed_mps) * 3.6, 1)
+        : '--';
+
     $lastSeen = $trackingSession->last_seen_at?->diffForHumans() ?? '--';
     $hasLocation = $latestTelemetry?->latitude !== null && $latestTelemetry?->longitude !== null;
+    $mapCenter = $hasLocation
+        ? [(float) $latestTelemetry->latitude, (float) $latestTelemetry->longitude]
+        : null;
+    $trailPoints = ($breadcrumbTrail ?? collect())->values();
     $isEnded = $trackingSession->ended_at !== null || $trackingSession->status === 'ended';
     $isStale = ! $isEnded && (
         $trackingSession->last_seen_at === null ||
@@ -27,6 +53,12 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta http-equiv="refresh" content="60">
         <title>Live Session - {{ config('app.name', 'StridePulse') }}</title>
+        <link
+            rel="stylesheet"
+            href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+            integrity="sha256-p4NxAoJBhIINfQPD9eMQpQmHTVwRIsjD5fEnwV1b3r0="
+            crossorigin=""
+        >
         <style>
             :root {
                 color-scheme: light;
@@ -153,10 +185,8 @@
 
             .map {
                 min-height: 220px;
-                display: grid;
-                place-items: center;
                 border-radius: 8px;
-                border: 1px dashed #9aa8b8;
+                border: 1px solid #cbd5e1;
                 background:
                     linear-gradient(90deg, rgba(15, 118, 110, 0.08) 1px, transparent 1px),
                     linear-gradient(rgba(15, 118, 110, 0.08) 1px, transparent 1px),
@@ -165,6 +195,34 @@
                 color: #24463f;
                 text-align: center;
                 padding: 16px;
+            }
+
+            #live-map {
+                min-height: 360px;
+                padding: 0;
+                overflow: hidden;
+            }
+
+            .map-empty {
+                min-height: 220px;
+                display: grid;
+                place-items: center;
+                padding: 16px;
+            }
+
+            .athlete-marker {
+                align-items: center;
+                background: #0f766e;
+                border: 3px solid #ffffff;
+                border-radius: 999px;
+                box-shadow: 0 4px 12px rgba(15, 23, 42, 0.28);
+                color: #ffffff;
+                display: flex;
+                font-size: 13px;
+                font-weight: 800;
+                height: 28px;
+                justify-content: center;
+                width: 28px;
             }
 
             .link {
@@ -244,6 +302,19 @@
                     <p class="value">{{ $pace }}</p>
                 </article>
                 <article class="panel">
+                    <p class="label">Average pace</p>
+                    <p class="value">{{ $averagePace }}</p>
+                </article>
+                <article class="panel">
+                    <p class="label">Elapsed time</p>
+                    <p class="value">{{ $elapsedTime }}</p>
+                </article>
+                <article class="panel">
+                    <p class="label">Current speed</p>
+                    <p class="value">{{ $currentSpeed }}</p>
+                    <p class="subvalue">km/h</p>
+                </article>
+                <article class="panel">
                     <p class="label">Heart rate</p>
                     <p class="value">{{ $latestTelemetry?->heart_rate_bpm ?? '--' }}</p>
                     <p class="subvalue">bpm</p>
@@ -262,22 +333,53 @@
                     <p class="value">{{ $latestTelemetry?->battery_percent !== null ? $latestTelemetry->battery_percent.'%' : '--' }}</p>
                 </article>
                 <article class="panel">
+                    <p class="label">Altitude</p>
+                    <p class="value">{{ $latestTelemetry?->altitude_m !== null ? number_format((float) $latestTelemetry->altitude_m, 0) : '--' }}</p>
+                    <p class="subvalue">m</p>
+                </article>
+                <article class="panel">
+                    <p class="label">Heading</p>
+                    <p class="value">{{ $latestTelemetry?->heading_degrees !== null ? number_format((float) $latestTelemetry->heading_degrees, 0).'°' : '--' }}</p>
+                </article>
+                <article class="panel">
+                    <p class="label">Ascent / descent</p>
+                    <p class="value">
+                        {{ $latestTelemetry?->ascent_m !== null ? number_format((float) $latestTelemetry->ascent_m, 0) : '--' }}
+                        /
+                        {{ $latestTelemetry?->descent_m !== null ? number_format((float) $latestTelemetry->descent_m, 0) : '--' }}
+                    </p>
+                    <p class="subvalue">m</p>
+                </article>
+                <article class="panel">
+                    <p class="label">Calories</p>
+                    <p class="value">{{ $latestTelemetry?->calories ?? '--' }}</p>
+                    <p class="subvalue">kcal</p>
+                </article>
+                <article class="panel">
+                    <p class="label">Lap</p>
+                    <p class="value">{{ $latestTelemetry?->lap_number ?? '--' }}</p>
+                </article>
+                <article class="panel">
                     <p class="label">Source</p>
                     <p class="value">{{ $trackingSession->telemetry_source ?? '--' }}</p>
                 </article>
 
                 <article class="panel wide">
                     <p class="label">Map</p>
-                    <div class="map">
+                    <div id="live-map" class="map">
                         @if ($hasLocation)
-                            <div>
-                                <strong>Location received</strong>
-                                <p class="subvalue">
-                                    {{ $latestTelemetry->latitude }}, {{ $latestTelemetry->longitude }}
-                                </p>
-                            </div>
+                            <noscript>
+                                <div class="map-empty">
+                                    <div>
+                                        <strong>Location received</strong>
+                                        <p class="subvalue">
+                                            {{ $latestTelemetry->latitude }}, {{ $latestTelemetry->longitude }}
+                                        </p>
+                                    </div>
+                                </div>
+                            </noscript>
                         @else
-                            <div>
+                            <div class="map-empty">
                                 <strong>No location yet</strong>
                                 <p class="subvalue">Map appears after Garmin telemetry includes latitude and longitude.</p>
                             </div>
@@ -301,5 +403,45 @@
                 </article>
             </section>
         </main>
+        @if ($hasLocation)
+            <script
+                src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+                integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+                crossorigin=""
+            ></script>
+            <script>
+                const center = @json($mapCenter);
+                const trail = @json($trailPoints);
+                const map = L.map('live-map', {
+                    scrollWheelZoom: false,
+                }).setView(center, 15);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '&copy; OpenStreetMap contributors',
+                    maxZoom: 19,
+                }).addTo(map);
+
+                const markerIcon = L.divIcon({
+                    className: '',
+                    html: '<div class="athlete-marker">●</div>',
+                    iconAnchor: [14, 14],
+                    iconSize: [28, 28],
+                });
+
+                const latLngs = trail.map((point) => [point.lat, point.lng]);
+                if (latLngs.length > 1) {
+                    L.polyline(latLngs, {
+                        color: '#0f766e',
+                        opacity: 0.85,
+                        weight: 4,
+                    }).addTo(map);
+                    map.fitBounds(latLngs, { padding: [28, 28], maxZoom: 16 });
+                }
+
+                L.marker(center, { icon: markerIcon })
+                    .addTo(map)
+                    .bindPopup('Latest Garmin telemetry');
+            </script>
+        @endif
     </body>
 </html>

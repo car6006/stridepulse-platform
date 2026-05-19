@@ -13,13 +13,22 @@ function garminTelemetryPayload(array $overrides = []): array
         'ingestion_id' => 'ingestion-001',
         'recorded_at' => '2026-05-17T17:00:00Z',
         'elapsed_seconds' => 1234,
+        'elapsed_time_seconds' => 1235,
         'distance_m' => 4321.5,
         'pace_sec_per_km' => 315,
+        'average_pace_sec_per_km' => 330,
+        'current_speed_mps' => 3.175,
         'heart_rate_bpm' => 148,
         'avg_heart_rate_bpm' => 142,
         'cadence' => 172,
         'latitude' => -33.9249,
         'longitude' => 18.4241,
+        'altitude_m' => 47.5,
+        'heading_degrees' => 186.25,
+        'ascent_m' => 82.4,
+        'descent_m' => 79.2,
+        'calories' => 410,
+        'lap_number' => 3,
         'gps_status' => 'LOCK',
         'battery_percent' => 87,
         'device_model' => 'fr965',
@@ -50,12 +59,24 @@ test('valid payload creates telemetry point', function () {
         'tracking_session_id' => $session->id,
         'ingestion_id' => 'ingestion-001',
         'elapsed_seconds' => 1234,
+        'elapsed_time_seconds' => 1235,
         'pace_sec_per_km' => 315,
+        'average_pace_sec_per_km' => 330,
         'heart_rate_bpm' => 148,
         'gps_status' => 'LOCK',
         'battery_percent' => 87,
         'device_model' => 'fr965',
+        'calories' => 410,
+        'lap_number' => 3,
     ]);
+
+    $point = TelemetryPoint::query()->firstOrFail();
+
+    expect((float) $point->current_speed_mps)->toBe(3.175)
+        ->and((float) $point->altitude_m)->toBe(47.5)
+        ->and((float) $point->heading_degrees)->toBe(186.25)
+        ->and((float) $point->ascent_m)->toBe(82.4)
+        ->and((float) $point->descent_m)->toBe(79.2);
 });
 
 test('invalid session token returns 404', function () {

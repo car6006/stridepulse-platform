@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AthleteActivity;
+use App\Models\Device;
 use App\Models\TelemetryPoint;
 use App\Models\TrackingSession;
 use Illuminate\Http\JsonResponse;
@@ -28,6 +29,8 @@ class GarminTelemetryController extends Controller
 
         $validator = Validator::make($request->all(), [
             'session_token' => ['required', 'string', 'max:255'],
+            'device_uuid' => ['nullable', 'required_with:device_secret', 'uuid'],
+            'device_secret' => ['nullable', 'required_with:device_uuid', 'string', 'max:255'],
             'ingestion_id' => ['nullable', 'string', 'max:255'],
             'recorded_at' => ['required', 'date'],
             'elapsed_seconds' => ['nullable', 'integer', 'min:0'],
@@ -43,8 +46,8 @@ class GarminTelemetryController extends Controller
             'longitude' => ['nullable', 'numeric', 'between:-180,180'],
             'altitude_m' => ['nullable', 'numeric'],
             'heading_degrees' => ['nullable', 'numeric', 'min:0', 'max:360'],
-            'ascent_m' => ['nullable', 'numeric', 'min:0'],
-            'descent_m' => ['nullable', 'numeric', 'min:0'],
+            'ascent_m' => ['nullable', 'numeric'],
+            'descent_m' => ['nullable', 'numeric'],
             'calories' => ['nullable', 'integer', 'min:0'],
             'lap_number' => ['nullable', 'integer', 'min:0'],
             'gps_status' => ['nullable', 'string', 'max:50'],
@@ -63,6 +66,15 @@ class GarminTelemetryController extends Controller
 
         $validated = $validator->validate();
         $activityState = $validated['activity_state'] ?? 'active';
+        $device = $this->resolveDevice($validated);
+
+        if ($device === false) {
+            return response()->json([
+                'ok' => false,
+                'status' => 'device_forbidden',
+                'message' => 'Device credentials are invalid',
+            ], 403);
+        }
 
         $trackingSession = TrackingSession::query()
             ->where('session_token', $validated['session_token'])
@@ -77,6 +89,14 @@ class GarminTelemetryController extends Controller
             ], 404);
         }
 
+        if ($device instanceof Device && (int) $trackingSession->device_id !== (int) $device->id) {
+            return response()->json([
+                'ok' => false,
+                'status' => 'device_session_mismatch',
+                'message' => 'Tracking session is not assigned to this device',
+            ], 403);
+        }
+
         if (! empty($validated['ingestion_id'])) {
             $existingPoint = TelemetryPoint::query()
                 ->where('tracking_session_id', $trackingSession->id)
@@ -88,6 +108,8 @@ class GarminTelemetryController extends Controller
                     'last_seen_at' => now(),
                     'last_direct_telemetry_at' => now(),
                 ])->save();
+
+                $device?->forceFill(['last_seen_at' => now()])->save();
 
                 return $this->receivedResponse();
             }
@@ -156,12 +178,31 @@ class GarminTelemetryController extends Controller
         }
 
         $trackingSession->forceFill($sessionUpdates)->save();
+        $device?->forceFill(['last_seen_at' => now()])->save();
 
         if ($activityState === 'completed') {
             $this->createOrUpdateAthleteActivity($trackingSession->fresh(['athlete', 'sport']));
         }
 
         return $this->receivedResponse();
+    }
+
+    private function resolveDevice(array $validated): Device|bool|null
+    {
+        if (empty($validated['device_uuid']) && empty($validated['device_secret'])) {
+            return null;
+        }
+
+        $device = Device::query()
+            ->where('uuid', $validated['device_uuid'] ?? null)
+            ->where('status', 'active')
+            ->first();
+
+        if (! $device || ! hash_equals($device->device_secret, $validated['device_secret'] ?? '')) {
+            return false;
+        }
+
+        return $device;
     }
 
     private function createOrUpdateAthleteActivity(TrackingSession $trackingSession): AthleteActivity

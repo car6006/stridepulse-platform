@@ -17,6 +17,7 @@ class TrackingSessionFactory extends Factory
             'uuid' => Str::uuid(),
             'session_token' => Str::random(40),
             'athlete_id' => Athlete::factory(),
+            'device_id' => null,
             'sport_id' => Sport::factory(),
             'race_entry_id' => null,
             'device_source' => 'garmin_connect_iq',

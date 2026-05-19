@@ -23,6 +23,22 @@
             </div>
 
             <div class="space-y-2">
+                <label for="device_id" class="text-sm font-medium text-zinc-800 dark:text-zinc-200">Garmin device</label>
+                <select id="device_id" name="device_id" class="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-950 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
+                    <option value="">Session token only</option>
+                    @foreach ($devices as $device)
+                        <option value="{{ $device->id }}" @selected(old('device_id') == $device->id)>
+                            {{ $device->athlete?->name }} · {{ $device->name }}
+                        </option>
+                    @endforeach
+                </select>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">Choose a registered device to require device UUID and secret on Garmin telemetry.</p>
+                @error('device_id')
+                    <p class="text-sm text-red-600 dark:text-red-400">{{ $message }}</p>
+                @enderror
+            </div>
+
+            <div class="space-y-2">
                 <label for="sport_id" class="text-sm font-medium text-zinc-800 dark:text-zinc-200">Sport</label>
                 <select id="sport_id" name="sport_id" required class="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-950 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
                     <option value="">Select sport</option>

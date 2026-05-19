@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Athlete;
+use App\Models\Device;
 use App\Models\Sport;
 use App\Models\TrackingSession;
 use App\Models\User;
@@ -50,26 +51,61 @@ test('garmin setup page shows endpoint and can generate setup token', function (
         ->assertSee(session('garmin_setup_token'));
 });
 
+test('device can be registered from dashboard', function () {
+    $this->actingAs(User::factory()->create());
+
+    $athlete = Athlete::factory()->create(['name' => 'Casey Device']);
+
+    $this->get(route('devices.create'))
+        ->assertOk()
+        ->assertSee('Register Garmin Device')
+        ->assertSee('Casey Device');
+
+    $this->followingRedirects()
+        ->post(route('devices.store'), [
+            'athlete_id' => $athlete->id,
+            'name' => 'Casey FR965',
+            'type' => 'watch',
+            'provider' => 'garmin',
+        ])
+        ->assertOk()
+        ->assertSee('Garmin device registered.')
+        ->assertSee('Casey FR965')
+        ->assertSee('Device UUID')
+        ->assertSee('Device secret');
+
+    $device = Device::query()->firstOrFail();
+
+    expect($device->athlete_id)->toBe($athlete->id)
+        ->and($device->provider)->toBe('garmin')
+        ->and($device->device_secret)->not->toBeEmpty()
+        ->and($device->metadata)->toHaveKey('pairing_code');
+});
+
 test('authenticated user can start and list a tracking session', function () {
     $this->actingAs(User::factory()->create());
 
     $athlete = Athlete::factory()->create(['name' => 'Morgan Athlete']);
     $sport = Sport::factory()->create(['name' => 'running']);
+    $device = Device::factory()->for($athlete)->create(['name' => 'Morgan Garmin']);
 
     $this->get(route('tracking-sessions.create'))
         ->assertOk()
         ->assertSee('Morgan Athlete')
+        ->assertSee('Morgan Garmin')
         ->assertSee('Running');
 
     $this->post(route('tracking-sessions.store'), [
         'athlete_id' => $athlete->id,
+        'device_id' => $device->id,
         'sport_id' => $sport->id,
     ])->assertRedirect(route('live-sessions.index'));
 
     $session = TrackingSession::query()->firstOrFail();
 
     expect($session->status)->toBe('active')
-        ->and($session->session_token)->not->toBeNull();
+        ->and($session->session_token)->not->toBeNull()
+        ->and($session->device_id)->toBe($device->id);
 
     $this->get(route('live-sessions.index'))
         ->assertOk()

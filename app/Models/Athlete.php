@@ -18,4 +18,5 @@ class Athlete extends Model
     public function trackingSessions() { return $this->hasMany(TrackingSession::class); }
     public function athleteActivities() { return $this->hasMany(AthleteActivity::class); }
     public function garminConnections() { return $this->hasMany(GarminConnection::class); }
+    public function devices() { return $this->hasMany(Device::class); }
 }

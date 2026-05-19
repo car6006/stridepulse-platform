@@ -18,6 +18,7 @@ class TrackingSession extends Model
         'last_direct_telemetry_at' => 'datetime',
     ];
     public function athlete() { return $this->belongsTo(Athlete::class); }
+    public function device() { return $this->belongsTo(Device::class); }
     public function sport() { return $this->belongsTo(Sport::class); }
     public function raceEntry() { return $this->belongsTo(RaceEntry::class); }
     public function telemetryPoints() { return $this->hasMany(TelemetryPoint::class); }

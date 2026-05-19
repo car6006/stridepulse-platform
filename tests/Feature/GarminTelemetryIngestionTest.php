@@ -1,3 +1,13 @@
+<?php
+
+use App\Models\AthleteActivity;
+use App\Models\Device;
+use App\Models\TelemetryPoint;
+use App\Models\TrackingSession;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+
+uses(RefreshDatabase::class);
+
 test('optional telemetry fields can be null', function () {
     $session = TrackingSession::factory()->create([
         'session_token' => 'garmin-session-token',
@@ -79,14 +89,6 @@ test('successful ingestion with edge values', function () {
         ->and((int) $point->elapsed_time_seconds)->toBe(86399)
         ->and($point->device_model)->toBe(str_repeat('a', 255));
 });
-<?php
-
-	use App\Models\AthleteActivity;
-	use App\Models\TelemetryPoint;
-	use App\Models\TrackingSession;
-use Illuminate\Foundation\Testing\RefreshDatabase;
-
-uses(RefreshDatabase::class);
 
 function garminTelemetryPayload(array $overrides = []): array
 {
@@ -319,4 +321,70 @@ test('completed telemetry creates activity record', function () {
         ->and((float) $activity->start_latitude)->toBe(-33.9)
         ->and((float) $activity->end_latitude)->toBe(-33.91)
         ->and($activity->summary_payload['telemetry_points_count'])->toBe(2);
+});
+
+test('telemetry is accepted for correct device and session', function () {
+    $device = Device::factory()->create();
+    $session = TrackingSession::factory()->create([
+        'athlete_id' => $device->athlete_id,
+        'device_id' => $device->id,
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'device_uuid' => $device->uuid,
+        'device_secret' => $device->device_secret,
+    ]))->assertOk();
+
+    expect(TelemetryPoint::query()->count())->toBe(1)
+        ->and(TelemetryPoint::query()->first()->tracking_session_id)->toBe($session->id)
+        ->and($device->fresh()->last_seen_at)->not->toBeNull();
+});
+
+test('telemetry is rejected for wrong device secret', function () {
+    $device = Device::factory()->create();
+    TrackingSession::factory()->create([
+        'athlete_id' => $device->athlete_id,
+        'device_id' => $device->id,
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'device_uuid' => $device->uuid,
+        'device_secret' => 'wrong-secret',
+    ]))
+        ->assertForbidden()
+        ->assertJson([
+            'ok' => false,
+            'status' => 'device_forbidden',
+        ]);
+
+    expect(TelemetryPoint::query()->count())->toBe(0)
+        ->and($device->fresh()->last_seen_at)->toBeNull();
+});
+
+test('telemetry is rejected if session does not belong to device', function () {
+    $device = Device::factory()->create();
+    $otherDevice = Device::factory()->create();
+
+    TrackingSession::factory()->create([
+        'athlete_id' => $otherDevice->athlete_id,
+        'device_id' => $otherDevice->id,
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'device_uuid' => $device->uuid,
+        'device_secret' => $device->device_secret,
+    ]))
+        ->assertForbidden()
+        ->assertJson([
+            'ok' => false,
+            'status' => 'device_session_mismatch',
+        ]);
+
+    expect(TelemetryPoint::query()->count())->toBe(0);
 });

@@ -18,7 +18,7 @@
             <article class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
                 <h2 class="text-lg font-semibold text-zinc-950 dark:text-white">Device UUID</h2>
                 <p class="mt-3 break-all rounded-md border border-zinc-200 bg-zinc-50 p-3 font-mono text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
-                    {{ $device->uuid }}
+                    {{ $device->device_uuid ?? $device->uuid }}
                 </p>
             </article>
 

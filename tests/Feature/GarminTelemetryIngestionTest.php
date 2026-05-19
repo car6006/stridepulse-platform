@@ -342,6 +342,48 @@ test('telemetry is accepted for correct device and session', function () {
         ->and($device->fresh()->last_seen_at)->not->toBeNull();
 });
 
+test('unknown device telemetry creates unclaimed device', function () {
+    TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'device_uuid' => 'sp-fr965-sim-discovery-001',
+        'device_secret' => 'discovered-secret',
+        'device_model' => 'fr965_sim',
+        'app_version' => '1.0.0',
+    ]))->assertOk();
+
+    $device = Device::query()->where('device_uuid', 'sp-fr965-sim-discovery-001')->firstOrFail();
+
+    expect($device->status)->toBe('unclaimed')
+        ->and($device->athlete_id)->toBeNull()
+        ->and($device->provider)->toBe('garmin')
+        ->and($device->type)->toBe('watch')
+        ->and($device->name)->toBe('fr965_sim')
+        ->and($device->device_secret)->toBe('discovered-secret')
+        ->and($device->last_seen_at)->not->toBeNull()
+        ->and($device->metadata['app_version'])->toBe('1.0.0')
+        ->and(TelemetryPoint::query()->count())->toBe(1);
+});
+
+test('unknown device heartbeat without valid session does not create telemetry point', function () {
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'session_token' => 'missing-token',
+        'device_uuid' => 'sp-fr965-sim-heartbeat-001',
+        'device_secret' => 'heartbeat-secret',
+    ]))
+        ->assertOk()
+        ->assertJson([
+            'ok' => true,
+            'status' => 'device_seen',
+        ]);
+
+    expect(Device::query()->where('device_uuid', 'sp-fr965-sim-heartbeat-001')->where('status', 'unclaimed')->exists())->toBeTrue()
+        ->and(TelemetryPoint::query()->count())->toBe(0);
+});
+
 test('telemetry is rejected for wrong device secret', function () {
     $device = Device::factory()->create();
     TrackingSession::factory()->create([
@@ -387,4 +429,33 @@ test('telemetry is rejected if session does not belong to device', function () {
         ]);
 
     expect(TelemetryPoint::query()->count())->toBe(0);
+});
+
+test('telemetry is accepted after device is claimed and session belongs to device', function () {
+    $device = Device::factory()->create([
+        'athlete_id' => null,
+        'device_uuid' => 'sp-fr965-sim-claimed-001',
+        'device_secret' => 'claimed-secret',
+        'status' => 'unclaimed',
+    ]);
+
+    $athlete = \App\Models\Athlete::factory()->create();
+    $device->forceFill([
+        'athlete_id' => $athlete->id,
+        'status' => 'active',
+    ])->save();
+
+    $session = TrackingSession::factory()->create([
+        'athlete_id' => $athlete->id,
+        'device_id' => $device->id,
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'device_uuid' => 'sp-fr965-sim-claimed-001',
+        'device_secret' => 'claimed-secret',
+    ]))->assertOk();
+
+    expect(TelemetryPoint::query()->first()?->tracking_session_id)->toBe($session->id);
 });

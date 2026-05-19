@@ -28,9 +28,10 @@ class GarminTelemetryController extends Controller
         ]);
 
         $validator = Validator::make($request->all(), [
-            'session_token' => ['required', 'string', 'max:255'],
-            'device_uuid' => ['nullable', 'required_with:device_secret', 'uuid'],
+            'session_token' => ['nullable', 'required_without:device_uuid', 'string', 'max:255'],
+            'device_uuid' => ['nullable', 'required_with:device_secret', 'string', 'max:255'],
             'device_secret' => ['nullable', 'required_with:device_uuid', 'string', 'max:255'],
+            'app_version' => ['nullable', 'string', 'max:50'],
             'ingestion_id' => ['nullable', 'string', 'max:255'],
             'recorded_at' => ['required', 'date'],
             'elapsed_seconds' => ['nullable', 'integer', 'min:0'],
@@ -76,12 +77,32 @@ class GarminTelemetryController extends Controller
             ], 403);
         }
 
-        $trackingSession = TrackingSession::query()
-            ->where('session_token', $validated['session_token'])
-            ->when($activityState === 'active', fn ($query) => $query->whereNull('ended_at'))
-            ->first();
+        $trackingSession = null;
+
+        if (! empty($validated['session_token'])) {
+            $trackingSession = TrackingSession::query()
+                ->where('session_token', $validated['session_token'])
+                ->when($activityState === 'active', fn ($query) => $query->whereNull('ended_at'))
+                ->first();
+        }
 
         if (! $trackingSession) {
+            if ($device instanceof Device) {
+                $device->forceFill(['last_seen_at' => now()])->save();
+
+                Log::info('Garmin device heartbeat without valid tracking session', [
+                    'device_id' => $device->id,
+                    'device_uuid' => $device->device_uuid,
+                    'session_token' => $validated['session_token'] ?? null,
+                ]);
+
+                return response()->json([
+                    'ok' => true,
+                    'status' => 'device_seen',
+                    'message' => 'Device heartbeat received',
+                ]);
+            }
+
             return response()->json([
                 'ok' => false,
                 'status' => 'not_found',
@@ -89,7 +110,15 @@ class GarminTelemetryController extends Controller
             ], 404);
         }
 
-        if ($device instanceof Device && (int) $trackingSession->device_id !== (int) $device->id) {
+        if ($trackingSession->device_id !== null && ! ($device instanceof Device)) {
+            return response()->json([
+                'ok' => false,
+                'status' => 'device_required',
+                'message' => 'Tracking session requires device identity',
+            ], 403);
+        }
+
+        if ($device instanceof Device && $trackingSession->device_id !== null && (int) $trackingSession->device_id !== (int) $device->id) {
             return response()->json([
                 'ok' => false,
                 'status' => 'device_session_mismatch',
@@ -193,13 +222,56 @@ class GarminTelemetryController extends Controller
             return null;
         }
 
+        $deviceUuid = $validated['device_uuid'] ?? null;
+
         $device = Device::query()
-            ->where('uuid', $validated['device_uuid'] ?? null)
-            ->where('status', 'active')
+            ->where('device_uuid', $deviceUuid)
             ->first();
 
-        if (! $device || ! hash_equals($device->device_secret, $validated['device_secret'] ?? '')) {
+        if (! $device) {
+            return Device::query()->create([
+                'uuid' => (string) str()->uuid(),
+                'device_uuid' => $deviceUuid,
+                'athlete_id' => null,
+                'name' => $validated['device_model'] ?? 'Unknown Garmin Device',
+                'type' => 'watch',
+                'provider' => 'garmin',
+                'device_secret' => $validated['device_secret'] ?? str()->random(64),
+                'status' => 'unclaimed',
+                'last_seen_at' => now(),
+                'metadata' => [
+                    'device_model' => $validated['device_model'] ?? null,
+                    'app_version' => $validated['app_version'] ?? null,
+                    'first_seen_payload' => array_intersect_key($validated, array_flip([
+                        'device_uuid',
+                        'device_model',
+                        'app_version',
+                        'gps_status',
+                        'battery_percent',
+                    ])),
+                ],
+            ]);
+        }
+
+        if ($device->status === 'active' && ! empty($validated['device_secret']) && ! hash_equals($device->device_secret, $validated['device_secret'])) {
             return false;
+        }
+
+        if ($device->status === 'unclaimed') {
+            $metadata = $device->metadata ?? [];
+            $metadata['device_model'] = $validated['device_model'] ?? ($metadata['device_model'] ?? null);
+            $metadata['app_version'] = $validated['app_version'] ?? ($metadata['app_version'] ?? null);
+
+            $updates = [
+                'last_seen_at' => now(),
+                'metadata' => $metadata,
+            ];
+
+            if (($device->name === 'Unknown Garmin Device' || $device->name === '') && ! empty($validated['device_model'])) {
+                $updates['name'] = $validated['device_model'];
+            }
+
+            $device->forceFill($updates)->save();
         }
 
         return $device;

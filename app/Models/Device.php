@@ -13,6 +13,7 @@ class Device extends Model
 
     protected $casts = [
         'uuid' => 'string',
+        'device_uuid' => 'string',
         'last_seen_at' => 'datetime',
         'metadata' => 'array',
     ];

@@ -21,6 +21,9 @@
                     <flux:sidebar.item icon="layout-grid" :href="route('devices.index')" :current="request()->routeIs('devices.*')" wire:navigate>
                         {{ __('Devices') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="layout-grid" :href="route('devices.unclaimed')" :current="request()->routeIs('devices.unclaimed')" wire:navigate>
+                        {{ __('Unclaimed devices') }}
+                    </flux:sidebar.item>
                     <flux:sidebar.item icon="layout-grid" :href="route('garmin-setup.index')" :current="request()->routeIs('garmin-setup.*')" wire:navigate>
                         {{ __('Garmin setup') }}
                     </flux:sidebar.item>

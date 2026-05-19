@@ -7,9 +7,14 @@
                 <p class="mt-3 text-zinc-600 dark:text-zinc-400">Register Garmin watches and bind tracking sessions to athlete-owned devices.</p>
             </div>
 
-            <flux:button variant="primary" :href="route('devices.create')" wire:navigate>
-                {{ __('Register Garmin device') }}
-            </flux:button>
+            <div class="flex flex-wrap gap-3">
+                <flux:button :href="route('devices.unclaimed')" wire:navigate>
+                    {{ __('Unclaimed devices') }}
+                </flux:button>
+                <flux:button variant="primary" :href="route('devices.create')" wire:navigate>
+                    {{ __('Register Garmin device') }}
+                </flux:button>
+            </div>
         </div>
 
         @if (session('status'))
@@ -26,7 +31,7 @@
                         <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                             {{ $device->athlete?->name ?? 'Unassigned athlete' }} · {{ Str::headline($device->provider) }} {{ Str::headline($device->type) }} · {{ Str::headline($device->status) }}
                         </p>
-                        <p class="mt-1 text-xs font-mono text-zinc-500 dark:text-zinc-500">{{ $device->uuid }}</p>
+                        <p class="mt-1 text-xs font-mono text-zinc-500 dark:text-zinc-500">{{ $device->device_uuid ?? $device->uuid }}</p>
                     </div>
 
                     <div class="flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">

@@ -22,6 +22,17 @@ class DeviceController extends Controller
         ]);
     }
 
+    public function unclaimed(): View
+    {
+        return view('devices.unclaimed', [
+            'devices' => Device::query()
+                ->where('status', 'unclaimed')
+                ->latest('last_seen_at')
+                ->paginate(15),
+            'athletes' => Athlete::query()->orderBy('name')->get(),
+        ]);
+    }
+
     public function create(): View
     {
         return view('devices.create', [
@@ -38,8 +49,11 @@ class DeviceController extends Controller
             'provider' => ['required', 'string', 'max:50'],
         ]);
 
+        $uuid = (string) Str::uuid();
+
         $device = Device::query()->create([
-            'uuid' => (string) Str::uuid(),
+            'uuid' => $uuid,
+            'device_uuid' => $uuid,
             'athlete_id' => $validated['athlete_id'],
             'name' => $validated['name'],
             'type' => $validated['type'],
@@ -55,6 +69,24 @@ class DeviceController extends Controller
         return redirect()
             ->route('devices.show', $device)
             ->with('status', 'Garmin device registered.');
+    }
+
+    public function claim(Request $request, Device $device): RedirectResponse
+    {
+        $validated = $request->validate([
+            'athlete_id' => ['required', 'integer', 'exists:athletes,id'],
+        ]);
+
+        abort_unless($device->status === 'unclaimed', 404);
+
+        $device->forceFill([
+            'athlete_id' => $validated['athlete_id'],
+            'status' => 'active',
+        ])->save();
+
+        return redirect()
+            ->route('devices.show', $device)
+            ->with('status', 'Device claimed.');
     }
 
     public function show(Device $device): View

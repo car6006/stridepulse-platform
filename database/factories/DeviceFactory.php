@@ -13,8 +13,11 @@ class DeviceFactory extends Factory
 
     public function definition(): array
     {
+        $uuid = (string) Str::uuid();
+
         return [
-            'uuid' => (string) Str::uuid(),
+            'uuid' => $uuid,
+            'device_uuid' => $uuid,
             'athlete_id' => Athlete::factory(),
             'name' => 'Garmin '.$this->faker->word(),
             'type' => 'watch',

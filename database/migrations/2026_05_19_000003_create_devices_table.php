@@ -10,7 +10,8 @@ return new class extends Migration {
         Schema::create('devices', function (Blueprint $table) {
             $table->bigIncrements('id');
             $table->uuid('uuid')->unique();
-            $table->foreignId('athlete_id')->constrained()->cascadeOnDelete();
+            $table->string('device_uuid')->nullable()->unique();
+            $table->foreignId('athlete_id')->nullable()->constrained()->cascadeOnDelete();
             $table->string('name');
             $table->string('type')->default('watch');
             $table->string('provider')->default('garmin');

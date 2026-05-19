@@ -14,6 +14,8 @@ Route::get('/live/{session_token}', [LiveSessionController::class, 'show'])->nam
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::view('dashboard', 'dashboard')->name('dashboard');
     Route::resource('athletes', AthleteController::class)->except(['show']);
+    Route::get('devices/unclaimed', [DeviceController::class, 'unclaimed'])->name('devices.unclaimed');
+    Route::post('devices/{device}/claim', [DeviceController::class, 'claim'])->name('devices.claim');
     Route::resource('devices', DeviceController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('garmin-setup', [GarminSetupController::class, 'index'])->name('garmin-setup.index');
     Route::post('garmin-setup/token', [GarminSetupController::class, 'generate'])->name('garmin-setup.generate');

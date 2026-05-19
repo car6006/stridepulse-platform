@@ -82,6 +82,37 @@ test('device can be registered from dashboard', function () {
         ->and($device->metadata)->toHaveKey('pairing_code');
 });
 
+test('unclaimed device can be claimed by athlete', function () {
+    $this->actingAs(User::factory()->create());
+
+    $athlete = Athlete::factory()->create(['name' => 'Claim Runner']);
+    $device = Device::factory()->create([
+        'athlete_id' => null,
+        'device_uuid' => 'sp-fr965-sim-claimable',
+        'name' => 'fr965_sim',
+        'status' => 'unclaimed',
+        'last_seen_at' => now(),
+    ]);
+
+    $this->get(route('devices.unclaimed'))
+        ->assertOk()
+        ->assertSee('Unclaimed Devices')
+        ->assertSee('fr965_sim')
+        ->assertSee('Claim Runner');
+
+    $this->followingRedirects()
+        ->post(route('devices.claim', $device), [
+            'athlete_id' => $athlete->id,
+        ])
+        ->assertOk()
+        ->assertSee('Device claimed.');
+
+    $device->refresh();
+
+    expect($device->athlete_id)->toBe($athlete->id)
+        ->and($device->status)->toBe('active');
+});
+
 test('authenticated user can start and list a tracking session', function () {
     $this->actingAs(User::factory()->create());
 
@@ -111,6 +142,29 @@ test('authenticated user can start and list a tracking session', function () {
         ->assertOk()
         ->assertSee('Morgan Athlete')
         ->assertSee(route('live.session', $session->session_token));
+});
+
+test('claimed active device can be selected when starting a session', function () {
+    $this->actingAs(User::factory()->create());
+
+    $athlete = Athlete::factory()->create(['name' => 'Linked Runner']);
+    $sport = Sport::factory()->create(['name' => 'running']);
+    $device = Device::factory()->for($athlete)->create([
+        'name' => 'Linked FR965',
+        'status' => 'active',
+    ]);
+
+    $this->get(route('tracking-sessions.create'))
+        ->assertOk()
+        ->assertSee('Linked FR965');
+
+    $this->post(route('tracking-sessions.store'), [
+        'athlete_id' => $athlete->id,
+        'device_id' => $device->id,
+        'sport_id' => $sport->id,
+    ])->assertRedirect(route('live-sessions.index'));
+
+    expect(TrackingSession::query()->firstOrFail()->device_id)->toBe($device->id);
 });
 
 test('public live page auto refreshes and shows offline indicator for stale sessions', function () {

@@ -7,12 +7,25 @@ use App\Models\TrackingSession;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class GarminTelemetryController extends Controller
 {
     public function store(Request $request): JsonResponse
     {
-        $validated = $request->validate([
+        $rawBody = $request->getContent();
+        $decodedPayload = json_decode($rawBody, true);
+
+        Log::debug('Garmin telemetry request received', [
+            'content_type' => $request->header('Content-Type'),
+            'accept' => $request->header('Accept'),
+            'raw_body' => $rawBody,
+            'input' => $request->all(),
+            'json_payload' => json_last_error() === JSON_ERROR_NONE ? $decodedPayload : null,
+        ]);
+
+        $validator = Validator::make($request->all(), [
             'session_token' => ['required', 'string', 'max:255'],
             'ingestion_id' => ['nullable', 'string', 'max:255'],
             'recorded_at' => ['required', 'date'],
@@ -29,6 +42,15 @@ class GarminTelemetryController extends Controller
             'device_model' => ['nullable', 'string', 'max:255'],
             'raw_payload' => ['nullable', 'array'],
         ]);
+
+        if ($validator->fails()) {
+            Log::debug('Garmin telemetry validation failed', [
+                'errors' => $validator->errors()->toArray(),
+                'input' => $request->all(),
+            ]);
+        }
+
+        $validated = $validator->validate();
 
         $trackingSession = TrackingSession::query()
             ->where('session_token', $validated['session_token'])

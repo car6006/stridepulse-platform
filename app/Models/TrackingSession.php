@@ -22,4 +22,5 @@ class TrackingSession extends Model
     public function raceEntry() { return $this->belongsTo(RaceEntry::class); }
     public function telemetryPoints() { return $this->hasMany(TelemetryPoint::class); }
     public function liveTrackInboundMessages() { return $this->hasMany(LiveTrackInboundMessage::class); }
+    public function athleteActivity() { return $this->hasOne(AthleteActivity::class); }
 }

@@ -38,12 +38,15 @@
         ? [(float) $latestTelemetry->latitude, (float) $latestTelemetry->longitude]
         : null;
     $trailPoints = ($breadcrumbTrail ?? collect())->values();
-    $isEnded = $trackingSession->ended_at !== null || $trackingSession->status === 'ended';
+    $finalStatuses = ['stopped', 'completed', 'abandoned', 'ended'];
+    $isEnded = $trackingSession->ended_at !== null || in_array((string) $trackingSession->status, $finalStatuses, true);
+    $isCompleted = $trackingSession->status === 'completed';
+    $isStopped = $trackingSession->status === 'stopped';
     $isStale = ! $isEnded && (
         $trackingSession->last_seen_at === null ||
         $trackingSession->last_seen_at->lt(now()->subMinutes(3))
     );
-    $statusLabel = $isEnded ? 'Ended' : ($isStale ? 'Offline' : 'Live');
+    $statusLabel = $isEnded ? strtoupper((string) ($trackingSession->status ?: 'ended')) : ($isStale ? 'Offline' : 'Live');
 @endphp
 
 <!DOCTYPE html>
@@ -140,6 +143,12 @@
                 padding: 12px 14px;
                 color: #664400;
                 font-size: 14px;
+            }
+
+            .notice.final {
+                border-color: #b7e4c7;
+                background: #effdf4;
+                color: #166534;
             }
 
             .grid {
@@ -281,6 +290,17 @@
                     @if ($isStale)
                         <div class="notice">
                             This session is offline or stale. The page refreshes every 60 seconds and will update when new Garmin telemetry arrives.
+                        </div>
+                    @endif
+                    @if ($isEnded)
+                        <div class="notice final">
+                            @if ($isCompleted)
+                                This activity is complete. Final Garmin telemetry has been received and the activity summary has been saved.
+                            @elseif ($isStopped)
+                                This activity has stopped. Final telemetry remains visible for review.
+                            @else
+                                This tracking session has ended. Final telemetry remains visible for review.
+                            @endif
                         </div>
                     @endif
                 </div>

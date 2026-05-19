@@ -12,4 +12,5 @@ class Sport extends Model
         'name' => 'string',
     ];
     public function workouts() { return $this->hasMany(Workout::class); }
+    public function athleteActivities() { return $this->hasMany(AthleteActivity::class); }
 }

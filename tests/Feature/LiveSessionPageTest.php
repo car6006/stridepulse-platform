@@ -73,6 +73,27 @@ test('live session page shows livetrack link when available', function () {
         ->assertSee('https://livetrack.garmin.com/session/example');
 });
 
+test('completed live page shows final state', function () {
+    $session = TrackingSession::factory()->create([
+        'status' => 'completed',
+        'ended_at' => now()->subMinutes(20),
+        'last_seen_at' => now()->subMinutes(20),
+    ]);
+
+    TelemetryPoint::factory()->for($session, 'trackingSession')->create([
+        'recorded_at' => now()->subMinutes(20),
+        'distance_m' => 10000,
+        'pace_sec_per_km' => 360,
+        'heart_rate_bpm' => 150,
+    ]);
+
+    $this->get("/live/{$session->session_token}")
+        ->assertOk()
+        ->assertSee('COMPLETED')
+        ->assertSee('activity is complete')
+        ->assertDontSee('offline or stale');
+});
+
 test('live session page returns 404 for invalid token', function () {
     $this->get('/live/not-a-real-token')->assertNotFound();
 });

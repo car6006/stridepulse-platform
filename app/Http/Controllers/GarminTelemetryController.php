@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AthleteActivity;
 use App\Models\TelemetryPoint;
 use App\Models\TrackingSession;
 use Illuminate\Http\JsonResponse;
@@ -49,6 +50,7 @@ class GarminTelemetryController extends Controller
             'gps_status' => ['nullable', 'string', 'max:50'],
             'battery_percent' => ['nullable', 'integer', 'min:0', 'max:100'],
             'device_model' => ['nullable', 'string', 'max:255'],
+            'activity_state' => ['nullable', 'string', 'in:active,stopped,completed,abandoned'],
             'raw_payload' => ['nullable', 'array'],
         ]);
 
@@ -60,10 +62,11 @@ class GarminTelemetryController extends Controller
         }
 
         $validated = $validator->validate();
+        $activityState = $validated['activity_state'] ?? 'active';
 
         $trackingSession = TrackingSession::query()
             ->where('session_token', $validated['session_token'])
-            ->whereNull('ended_at')
+            ->when($activityState === 'active', fn ($query) => $query->whereNull('ended_at'))
             ->first();
 
         if (! $trackingSession) {
@@ -140,12 +143,105 @@ class GarminTelemetryController extends Controller
             'metadata' => [],
         ]);
 
-        $trackingSession->forceFill([
+        $recordedAt = Carbon::parse($validated['recorded_at']);
+
+        $sessionUpdates = [
             'last_seen_at' => now(),
             'last_direct_telemetry_at' => now(),
-        ])->save();
+        ];
+
+        if (in_array($activityState, ['stopped', 'completed', 'abandoned'], true)) {
+            $sessionUpdates['status'] = $activityState;
+            $sessionUpdates['ended_at'] = $trackingSession->ended_at ?? $recordedAt;
+        }
+
+        $trackingSession->forceFill($sessionUpdates)->save();
+
+        if ($activityState === 'completed') {
+            $this->createOrUpdateAthleteActivity($trackingSession->fresh(['athlete', 'sport']));
+        }
 
         return $this->receivedResponse();
+    }
+
+    private function createOrUpdateAthleteActivity(TrackingSession $trackingSession): AthleteActivity
+    {
+        $points = $trackingSession->telemetryPoints()
+            ->orderBy('recorded_at')
+            ->orderBy('id')
+            ->get();
+
+        $latestPoint = $points->last();
+        $firstLocation = $points->first(fn (TelemetryPoint $point) => $point->latitude !== null && $point->longitude !== null);
+        $lastLocation = $points->reverse()->first(fn (TelemetryPoint $point) => $point->latitude !== null && $point->longitude !== null);
+        $distance = $this->lastNonNull($points, 'distance_m');
+        $duration = $this->lastNonNull($points, 'elapsed_time_seconds') ?? $this->lastNonNull($points, 'elapsed_seconds');
+        $averageHeartRate = $this->averageInteger($points, 'heart_rate_bpm') ?? $this->lastNonNull($points, 'avg_heart_rate_bpm');
+        $maxHeartRate = $points->pluck('heart_rate_bpm')->filter(fn ($value) => $value !== null)->max();
+        $averagePace = $this->averagePace($distance, $duration, $points);
+
+        return AthleteActivity::query()->updateOrCreate(
+            ['tracking_session_id' => $trackingSession->id],
+            [
+                'uuid' => $trackingSession->athleteActivity?->uuid ?? (string) str()->uuid(),
+                'athlete_id' => $trackingSession->athlete_id,
+                'sport_id' => $trackingSession->sport_id,
+                'source' => $trackingSession->telemetry_source ?? 'connect_iq',
+                'status' => 'completed',
+                'started_at' => $trackingSession->started_at,
+                'ended_at' => $trackingSession->ended_at,
+                'duration_seconds' => $duration !== null ? (int) $duration : null,
+                'distance_m' => $distance,
+                'average_pace_sec_per_km' => $averagePace,
+                'average_heart_rate_bpm' => $averageHeartRate !== null ? (int) round($averageHeartRate) : null,
+                'max_heart_rate_bpm' => $maxHeartRate !== null ? (int) $maxHeartRate : null,
+                'calories' => $this->lastNonNull($points, 'calories'),
+                'ascent_m' => $this->lastNonNull($points, 'ascent_m'),
+                'descent_m' => $this->lastNonNull($points, 'descent_m'),
+                'start_latitude' => $firstLocation?->latitude,
+                'start_longitude' => $firstLocation?->longitude,
+                'end_latitude' => $lastLocation?->latitude,
+                'end_longitude' => $lastLocation?->longitude,
+                'summary_payload' => [
+                    'telemetry_points_count' => $points->count(),
+                    'latest_telemetry_point_id' => $latestPoint?->id,
+                    'latest_recorded_at' => $latestPoint?->recorded_at?->toIso8601String(),
+                    'final_distance_m' => $distance,
+                    'duration_seconds' => $duration,
+                    'average_heart_rate_bpm' => $averageHeartRate,
+                    'max_heart_rate_bpm' => $maxHeartRate,
+                    'average_pace_sec_per_km' => $averagePace,
+                ],
+            ],
+        );
+    }
+
+    private function lastNonNull($points, string $field): mixed
+    {
+        $point = $points->reverse()->first(fn (TelemetryPoint $point) => $point->{$field} !== null);
+
+        return $point?->{$field};
+    }
+
+    private function averageInteger($points, string $field): ?int
+    {
+        $values = $points->pluck($field)->filter(fn ($value) => $value !== null);
+
+        if ($values->isEmpty()) {
+            return null;
+        }
+
+        return (int) round($values->avg());
+    }
+
+    private function averagePace($distance, $duration, $points): ?int
+    {
+        if (is_numeric($distance) && is_numeric($duration) && (float) $distance > 0 && (int) $duration > 0) {
+            return (int) round(((int) $duration) / (((float) $distance) / 1000));
+        }
+
+        return $this->lastNonNull($points, 'average_pace_sec_per_km')
+            ?? $this->lastNonNull($points, 'pace_sec_per_km');
     }
 
     private function receivedResponse(): JsonResponse

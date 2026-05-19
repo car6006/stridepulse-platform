@@ -12,6 +12,7 @@ use App\Models\Event;
 use App\Models\RaceEntry;
 use App\Models\TrackingSession;
 use App\Models\TelemetryPoint;
+use App\Models\AthleteActivity;
 use App\Models\Supporter;
 use App\Models\NotificationSubscription;
 use App\Models\GarminConnection;
@@ -55,5 +56,23 @@ class RelationshipTest extends TestCase
         $session = TrackingSession::factory()->create();
         $point = TelemetryPoint::factory()->for($session, 'trackingSession')->create();
         $this->assertEquals($session->id, $point->trackingSession->id);
+    }
+
+    public function test_athlete_activity_relationships()
+    {
+        $athlete = Athlete::factory()->create();
+        $sport = Sport::factory()->create();
+        $session = TrackingSession::factory()->for($athlete)->for($sport)->create();
+        $activity = AthleteActivity::factory()
+            ->for($athlete)
+            ->for($sport)
+            ->for($session, 'trackingSession')
+            ->create();
+
+        $this->assertEquals($athlete->id, $activity->athlete->id);
+        $this->assertEquals($sport->id, $activity->sport->id);
+        $this->assertEquals($session->id, $activity->trackingSession->id);
+        $this->assertEquals($activity->id, $session->athleteActivity->id);
+        $this->assertTrue($athlete->athleteActivities->contains($activity));
     }
 }

@@ -81,8 +81,9 @@ test('successful ingestion with edge values', function () {
 });
 <?php
 
-use App\Models\TelemetryPoint;
-use App\Models\TrackingSession;
+	use App\Models\AthleteActivity;
+	use App\Models\TelemetryPoint;
+	use App\Models\TrackingSession;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
@@ -223,5 +224,99 @@ test('raw payload is stored', function () {
         ->toBe([
             'hr_raw' => 148,
             'gps_raw' => ['status' => 'LOCK'],
-        ]);
+	        ]);
+	});
+
+test('active telemetry still works', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'activity_state' => 'active',
+    ]))->assertOk();
+
+    expect($session->fresh()->status)->toBe('active')
+        ->and($session->fresh()->ended_at)->toBeNull()
+        ->and(TelemetryPoint::query()->count())->toBe(1);
+});
+
+test('stopped telemetry marks session stopped', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'activity_state' => 'stopped',
+        'recorded_at' => '2026-05-17T18:00:00Z',
+    ]))->assertOk();
+
+    $session->refresh();
+
+    expect($session->status)->toBe('stopped')
+        ->and($session->ended_at?->toIso8601String())->toBe('2026-05-17T18:00:00+00:00')
+        ->and(AthleteActivity::query()->count())->toBe(0);
+});
+
+test('completed telemetry creates activity record', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'started_at' => '2026-05-17 17:00:00',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'activity-start',
+        'recorded_at' => '2026-05-17T17:00:00Z',
+        'elapsed_seconds' => 0,
+        'elapsed_time_seconds' => 0,
+        'distance_m' => 0,
+        'heart_rate_bpm' => 120,
+        'latitude' => -33.9,
+        'longitude' => 18.4,
+    ]))->assertOk();
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'activity-complete',
+        'activity_state' => 'completed',
+        'recorded_at' => '2026-05-17T18:00:00Z',
+        'elapsed_seconds' => 3600,
+        'elapsed_time_seconds' => 3600,
+        'distance_m' => 10000,
+        'pace_sec_per_km' => 360,
+        'average_pace_sec_per_km' => 365,
+        'heart_rate_bpm' => 160,
+        'avg_heart_rate_bpm' => 145,
+        'calories' => 700,
+        'ascent_m' => 120,
+        'descent_m' => 115,
+        'latitude' => -33.91,
+        'longitude' => 18.41,
+    ]))->assertOk();
+
+    $session->refresh();
+    $activity = AthleteActivity::query()->firstOrFail();
+
+    expect($session->status)->toBe('completed')
+        ->and($session->ended_at?->toIso8601String())->toBe('2026-05-17T18:00:00+00:00')
+        ->and($activity->tracking_session_id)->toBe($session->id)
+        ->and($activity->athlete_id)->toBe($session->athlete_id)
+        ->and($activity->sport_id)->toBe($session->sport_id)
+        ->and($activity->status)->toBe('completed')
+        ->and($activity->duration_seconds)->toBe(3600)
+        ->and((float) $activity->distance_m)->toBe(10000.0)
+        ->and($activity->average_pace_sec_per_km)->toBe(360)
+        ->and($activity->average_heart_rate_bpm)->toBe(140)
+        ->and($activity->max_heart_rate_bpm)->toBe(160)
+        ->and($activity->calories)->toBe(700)
+        ->and((float) $activity->ascent_m)->toBe(120.0)
+        ->and((float) $activity->descent_m)->toBe(115.0)
+        ->and((float) $activity->start_latitude)->toBe(-33.9)
+        ->and((float) $activity->end_latitude)->toBe(-33.91)
+        ->and($activity->summary_payload['telemetry_points_count'])->toBe(2);
 });

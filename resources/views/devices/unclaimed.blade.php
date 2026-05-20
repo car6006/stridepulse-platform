@@ -24,7 +24,7 @@
                     <div>
                         <h2 class="text-lg font-semibold text-zinc-950 dark:text-white">{{ $device->name }}</h2>
                         <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                            {{ Str::limit($device->device_uuid ?? $device->uuid, 18, '') }} · Last seen {{ $device->last_seen_at?->diffForHumans() ?? 'never' }} · {{ Str::headline($device->status) }}
+                            Pairing code <span class="font-mono font-semibold text-zinc-950 dark:text-white">{{ $device->pairing_code ?? 'Not generated' }}</span> · Last seen {{ $device->last_seen_at?->diffForHumans() ?? 'never' }} · {{ Str::headline($device->status) }}
                         </p>
                     </div>
 

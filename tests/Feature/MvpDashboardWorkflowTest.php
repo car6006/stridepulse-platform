@@ -71,7 +71,7 @@ test('device can be registered from dashboard', function () {
         ->assertOk()
         ->assertSee('Garmin device registered.')
         ->assertSee('Casey FR965')
-        ->assertSee('Device UUID')
+        ->assertSee('Pairing code')
         ->assertSee('Device secret');
 
     $device = Device::query()->firstOrFail();

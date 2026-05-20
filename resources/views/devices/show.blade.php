@@ -14,26 +14,10 @@
             </div>
         @endif
 
-        <section class="grid gap-4 lg:grid-cols-2">
-            <article class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
-                <h2 class="text-lg font-semibold text-zinc-950 dark:text-white">Device UUID</h2>
-                <p class="mt-3 break-all rounded-md border border-zinc-200 bg-zinc-50 p-3 font-mono text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
-                    {{ $device->device_uuid ?? $device->uuid }}
-                </p>
-            </article>
-
-            <article class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
-                <h2 class="text-lg font-semibold text-zinc-950 dark:text-white">Device secret</h2>
-                <p class="mt-3 break-all rounded-md border border-zinc-200 bg-zinc-50 p-3 font-mono text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
-                    {{ $device->device_secret }}
-                </p>
-            </article>
-        </section>
-
         <section class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
             <h2 class="text-lg font-semibold text-zinc-950 dark:text-white">Pairing code</h2>
-            <p class="mt-3 inline-flex rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
-                {{ $device->metadata['pairing_code'] ?? 'Not generated' }}
+            <p class="mt-3 inline-flex rounded-md border border-zinc-200 bg-zinc-50 px-4 py-3 font-mono text-2xl font-semibold tracking-wide text-zinc-950 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
+                {{ $device->pairing_code ?? 'Not generated' }}
             </p>
             <dl class="mt-5 grid gap-4 text-sm md:grid-cols-3">
                 <div>
@@ -50,5 +34,25 @@
                 </div>
             </dl>
         </section>
+
+        <details class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+            <summary class="cursor-pointer text-lg font-semibold text-zinc-950 dark:text-white">Advanced / Developer details</summary>
+
+            <section class="mt-5 grid gap-4 lg:grid-cols-2">
+                <article>
+                    <h2 class="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Device UUID</h2>
+                    <p class="mt-3 break-all rounded-md border border-zinc-200 bg-zinc-50 p-3 font-mono text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
+                        {{ $device->device_uuid ?? $device->uuid }}
+                    </p>
+                </article>
+
+                <article>
+                    <h2 class="text-sm font-semibold text-zinc-700 dark:text-zinc-300">Device secret</h2>
+                    <p class="mt-3 break-all rounded-md border border-zinc-200 bg-zinc-50 p-3 font-mono text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
+                        {{ $device->device_secret }}
+                    </p>
+                </article>
+            </section>
+        </details>
     </div>
 </x-layouts::app>

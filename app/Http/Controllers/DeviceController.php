@@ -62,7 +62,7 @@ class DeviceController extends Controller
             'status' => 'active',
             'last_seen_at' => null,
             'metadata' => [
-                'pairing_code' => Str::upper(Str::random(8)),
+                'pairing_code' => Device::derivePairingCode($uuid),
             ],
         ]);
 

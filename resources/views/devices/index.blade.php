@@ -31,7 +31,9 @@
                         <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                             {{ $device->athlete?->name ?? 'Unassigned athlete' }} · {{ Str::headline($device->provider) }} {{ Str::headline($device->type) }} · {{ Str::headline($device->status) }}
                         </p>
-                        <p class="mt-1 text-xs font-mono text-zinc-500 dark:text-zinc-500">{{ $device->device_uuid ?? $device->uuid }}</p>
+                        <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+                            Pairing code <span class="font-mono font-semibold text-zinc-950 dark:text-white">{{ $device->pairing_code ?? 'Not generated' }}</span>
+                        </p>
                     </div>
 
                     <div class="flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">

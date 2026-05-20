@@ -1,10 +1,12 @@
 <?php
 
+use App\Http\Controllers\GarminDeviceDiscoveryController;
 use App\Http\Controllers\GarminTelemetryController;
 use App\Http\Controllers\LiveTrackInboundEmailController;
 use App\Http\Controllers\TrackingSessionController;
 use Illuminate\Support\Facades\Route;
 
+Route::post('/garmin/device-discovery', [GarminDeviceDiscoveryController::class, 'store']);
 Route::post('/garmin/telemetry', [GarminTelemetryController::class, 'store']);
 Route::post('/inbound/livetrack-email', [LiveTrackInboundEmailController::class, 'store']);
 Route::post('/tracking-sessions/start', [TrackingSessionController::class, 'start']);

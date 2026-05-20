@@ -16,6 +16,10 @@ class TrackingSession extends Model
         'ended_at' => 'datetime',
         'livetrack_received_at' => 'datetime',
         'last_direct_telemetry_at' => 'datetime',
+        'last_movement_at' => 'datetime',
+        'last_status_changed_at' => 'datetime',
+        'notification_suppressed_at' => 'datetime',
+        'notification_state' => 'array',
     ];
     public function athlete() { return $this->belongsTo(Athlete::class); }
     public function device() { return $this->belongsTo(Device::class); }

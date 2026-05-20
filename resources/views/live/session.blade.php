@@ -38,15 +38,25 @@
         ? [(float) $latestTelemetry->latitude, (float) $latestTelemetry->longitude]
         : null;
     $trailPoints = ($breadcrumbTrail ?? collect())->values();
-    $finalStatuses = ['stopped', 'completed', 'abandoned', 'ended'];
+    $finalStatuses = ['stopped', 'completed', 'discarded', 'abandoned', 'ended'];
     $isEnded = $trackingSession->ended_at !== null || in_array((string) $trackingSession->status, $finalStatuses, true);
     $isCompleted = $trackingSession->status === 'completed';
     $isStopped = $trackingSession->status === 'stopped';
+    $isStationary = $trackingSession->status === 'stationary';
+    $isAbandoned = $trackingSession->status === 'abandoned';
+    $isDiscarded = $trackingSession->status === 'discarded';
     $isStale = ! $isEnded && (
         $trackingSession->last_seen_at === null ||
-        $trackingSession->last_seen_at->lt(now()->subMinutes(3))
+        $trackingSession->last_seen_at->lt(now()->subSeconds((int) config('stridepulse.tracking.offline_after_seconds', 300)))
     );
-    $statusLabel = $isEnded ? strtoupper((string) ($trackingSession->status ?: 'ended')) : ($isStale ? 'Offline' : 'Live');
+    $statusLabel = match ((string) $trackingSession->status) {
+        'stationary' => 'STATIONARY',
+        'stopped' => 'STOPPED',
+        'completed' => 'COMPLETED',
+        'discarded' => 'DISCARDED',
+        'abandoned' => 'ABANDONED',
+        default => $isStale ? 'Offline' : 'Live',
+    };
 @endphp
 
 <!DOCTYPE html>
@@ -137,6 +147,11 @@
             .status.ended {
                 background: #e7edf4;
                 color: #344054;
+            }
+
+            .status.stationary {
+                background: #e0f2fe;
+                color: #075985;
             }
 
             .notice {
@@ -333,13 +348,17 @@
                                 This activity is complete. Final Garmin telemetry has been received and the activity summary has been saved.
                             @elseif ($isStopped)
                                 This activity has stopped. Final telemetry remains visible for review.
+                            @elseif ($isAbandoned)
+                                This tracking session was marked abandoned after telemetry stopped arriving. Final telemetry remains visible for review.
+                            @elseif ($isDiscarded)
+                                This tracking session was discarded. Final telemetry remains visible for review.
                             @else
                                 This tracking session has ended. Final telemetry remains visible for review.
                             @endif
                         </div>
                     @endif
                 </div>
-                <div class="status {{ $isStale ? 'offline' : '' }} {{ $isEnded ? 'ended' : '' }}">{{ $statusLabel }}</div>
+                <div class="status {{ $isStale ? 'offline' : '' }} {{ $isEnded ? 'ended' : '' }} {{ $isStationary ? 'stationary' : '' }}">{{ $statusLabel }}</div>
             </section>
 
             <section class="grid" aria-label="Live session metrics">

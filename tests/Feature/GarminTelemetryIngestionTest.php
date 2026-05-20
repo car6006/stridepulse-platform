@@ -4,7 +4,9 @@ use App\Models\AthleteActivity;
 use App\Models\Device;
 use App\Models\TelemetryPoint;
 use App\Models\TrackingSession;
+use App\Services\TrackingSessionLifecycleService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 
 uses(RefreshDatabase::class);
 
@@ -321,6 +323,91 @@ test('completed telemetry creates activity record', function () {
         ->and((float) $activity->start_latitude)->toBe(-33.9)
         ->and((float) $activity->end_latitude)->toBe(-33.91)
         ->and($activity->summary_payload['telemetry_points_count'])->toBe(2);
+});
+
+test('discarded telemetry marks session ended without creating public final summary', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'activity_state' => 'discarded',
+        'recorded_at' => '2026-05-17T18:00:00Z',
+    ]))->assertOk();
+
+    $session->refresh();
+
+    expect($session->status)->toBe('discarded')
+        ->and($session->ended_at?->toIso8601String())->toBe('2026-05-17T18:00:00+00:00')
+        ->and(AthleteActivity::query()->count())->toBe(0);
+});
+
+test('no movement for configured window marks session stationary', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'stationary-start',
+        'recorded_at' => '2026-05-17T17:00:00Z',
+        'distance_m' => 1000,
+        'latitude' => -33.9249000,
+        'longitude' => 18.4241000,
+    ]))->assertOk();
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'stationary-later',
+        'recorded_at' => '2026-05-17T17:05:01Z',
+        'distance_m' => 1005,
+        'latitude' => -33.9249100,
+        'longitude' => 18.4241100,
+    ]))->assertOk();
+
+    expect($session->fresh()->status)->toBe('stationary');
+});
+
+test('no telemetry for abandon threshold marks session abandoned via service', function () {
+    $session = TrackingSession::factory()->create([
+        'status' => 'active',
+        'ended_at' => null,
+        'last_direct_telemetry_at' => Carbon::parse('2026-05-17T17:00:00Z'),
+    ]);
+
+    app(TrackingSessionLifecycleService::class)->evaluateAbandoned(
+        $session,
+        Carbon::parse('2026-05-17T18:00:01Z'),
+    );
+
+    $session->refresh();
+
+    expect($session->status)->toBe('abandoned')
+        ->and($session->ended_at?->toIso8601String())->toBe('2026-05-17T18:00:01+00:00')
+        ->and($session->notification_suppressed_at)->not->toBeNull();
+});
+
+test('progress notifications are blocked after terminal states', function (string $state) {
+    $session = TrackingSession::factory()->create([
+        'status' => $state,
+        'ended_at' => now(),
+    ]);
+
+    expect(app(TrackingSessionLifecycleService::class)->canSendSupporterUpdate($session, 'progress'))->toBeFalse();
+})->with(['stopped', 'completed', 'discarded']);
+
+test('stationary alert is allowed only once per cooldown window', function () {
+    $service = app(TrackingSessionLifecycleService::class);
+    $session = TrackingSession::factory()->create([
+        'status' => 'stationary',
+        'ended_at' => null,
+    ]);
+
+    expect($service->canSendSupporterUpdate($session, 'stationary', true, Carbon::parse('2026-05-17T17:00:00Z')))->toBeTrue()
+        ->and($service->canSendSupporterUpdate($session, 'stationary', true, Carbon::parse('2026-05-17T17:10:00Z')))->toBeFalse()
+        ->and($service->canSendSupporterUpdate($session, 'stationary', true, Carbon::parse('2026-05-17T17:15:01Z')))->toBeTrue();
 });
 
 test('telemetry is accepted for correct device and session', function () {

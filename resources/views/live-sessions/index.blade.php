@@ -40,6 +40,18 @@
                             <flux:button :href="$liveUrl" target="_blank">
                                 {{ __('Open live URL') }}
                             </flux:button>
+                            <form method="POST" action="{{ route('live-sessions.complete', $trackingSession) }}">
+                                @csrf
+                                <flux:button type="submit">
+                                    {{ __('Complete') }}
+                                </flux:button>
+                            </form>
+                            <form method="POST" action="{{ route('live-sessions.discard', $trackingSession) }}">
+                                @csrf
+                                <flux:button type="submit" variant="danger">
+                                    {{ __('Discard') }}
+                                </flux:button>
+                            </form>
                         </div>
                     </div>
                 </article>

@@ -2,10 +2,11 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\AthleteActivity;
 use App\Models\Device;
 use App\Models\TelemetryPoint;
 use App\Models\TrackingSession;
+use App\Services\GarminDeviceDiscoveryService;
+use App\Services\TrackingSessionLifecycleService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -14,8 +15,11 @@ use Illuminate\Support\Facades\Validator;
 
 class GarminTelemetryController extends Controller
 {
-    public function store(Request $request): JsonResponse
-    {
+    public function store(
+        Request $request,
+        TrackingSessionLifecycleService $lifecycle,
+        GarminDeviceDiscoveryService $deviceDiscovery,
+    ): JsonResponse {
         $rawBody = $request->getContent();
         $decodedPayload = json_decode($rawBody, true);
 
@@ -54,7 +58,7 @@ class GarminTelemetryController extends Controller
             'gps_status' => ['nullable', 'string', 'max:50'],
             'battery_percent' => ['nullable', 'integer', 'min:0', 'max:100'],
             'device_model' => ['nullable', 'string', 'max:255'],
-            'activity_state' => ['nullable', 'string', 'in:active,stopped,completed,abandoned'],
+            'activity_state' => ['nullable', 'string', 'in:active,paused,stopped,completed,discarded,abandoned'],
             'raw_payload' => ['nullable', 'array'],
         ]);
 
@@ -67,7 +71,7 @@ class GarminTelemetryController extends Controller
 
         $validated = $validator->validate();
         $activityState = $validated['activity_state'] ?? 'active';
-        $device = $this->resolveDevice($validated);
+        $device = $deviceDiscovery->resolve($validated);
 
         if ($device === false) {
             return response()->json([
@@ -82,7 +86,17 @@ class GarminTelemetryController extends Controller
         if (! empty($validated['session_token'])) {
             $trackingSession = TrackingSession::query()
                 ->where('session_token', $validated['session_token'])
-                ->when($activityState === 'active', fn ($query) => $query->whereNull('ended_at'))
+                ->when(in_array($activityState, ['active', 'paused'], true), fn ($query) => $query->whereNull('ended_at'))
+                ->first();
+        }
+
+        if (! $trackingSession && empty($validated['session_token']) && $device instanceof Device && $device->status === 'active') {
+            $trackingSession = TrackingSession::query()
+                ->where('device_id', $device->id)
+                ->whereNull('ended_at')
+                ->whereIn('status', ['active', 'paused', 'stationary'])
+                ->latest('started_at')
+                ->latest('id')
                 ->first();
         }
 
@@ -166,7 +180,7 @@ class GarminTelemetryController extends Controller
         $deviceModel = $validated['device_model'] ?? null;
         $deviceModel = (is_string($deviceModel) && strlen($deviceModel) <= 255) ? $deviceModel : null;
 
-        TelemetryPoint::query()->create([
+        $telemetryPoint = TelemetryPoint::query()->create([
             'tracking_session_id' => $trackingSession->id,
             'ingestion_id' => $validated['ingestion_id'] ?? null,
             'recorded_at' => Carbon::parse($validated['recorded_at']),
@@ -194,167 +208,15 @@ class GarminTelemetryController extends Controller
             'metadata' => [],
         ]);
 
-        $recordedAt = Carbon::parse($validated['recorded_at']);
-
-        $sessionUpdates = [
+        $trackingSession->forceFill([
             'last_seen_at' => now(),
             'last_direct_telemetry_at' => now(),
-        ];
-
-        if (in_array($activityState, ['stopped', 'completed', 'abandoned'], true)) {
-            $sessionUpdates['status'] = $activityState;
-            $sessionUpdates['ended_at'] = $trackingSession->ended_at ?? $recordedAt;
-        }
-
-        $trackingSession->forceFill($sessionUpdates)->save();
+        ])->save();
         $device?->forceFill(['last_seen_at' => now()])->save();
 
-        if ($activityState === 'completed') {
-            $this->createOrUpdateAthleteActivity($trackingSession->fresh(['athlete', 'sport']));
-        }
+        $lifecycle->evaluateAfterTelemetry($trackingSession, $telemetryPoint, $activityState);
 
         return $this->receivedResponse();
-    }
-
-    private function resolveDevice(array $validated): Device|bool|null
-    {
-        if (empty($validated['device_uuid']) && empty($validated['device_secret'])) {
-            return null;
-        }
-
-        $deviceUuid = $validated['device_uuid'] ?? null;
-
-        $device = Device::query()
-            ->where('device_uuid', $deviceUuid)
-            ->first();
-
-        if (! $device) {
-            return Device::query()->create([
-                'uuid' => (string) str()->uuid(),
-                'device_uuid' => $deviceUuid,
-                'athlete_id' => null,
-                'name' => $validated['device_model'] ?? 'Unknown Garmin Device',
-                'type' => 'watch',
-                'provider' => 'garmin',
-                'device_secret' => $validated['device_secret'] ?? str()->random(64),
-                'status' => 'unclaimed',
-                'last_seen_at' => now(),
-                'metadata' => [
-                    'device_model' => $validated['device_model'] ?? null,
-                    'app_version' => $validated['app_version'] ?? null,
-                    'first_seen_payload' => array_intersect_key($validated, array_flip([
-                        'device_uuid',
-                        'device_model',
-                        'app_version',
-                        'gps_status',
-                        'battery_percent',
-                    ])),
-                ],
-            ]);
-        }
-
-        if ($device->status === 'active' && ! empty($validated['device_secret']) && ! hash_equals($device->device_secret, $validated['device_secret'])) {
-            return false;
-        }
-
-        if ($device->status === 'unclaimed') {
-            $metadata = $device->metadata ?? [];
-            $metadata['device_model'] = $validated['device_model'] ?? ($metadata['device_model'] ?? null);
-            $metadata['app_version'] = $validated['app_version'] ?? ($metadata['app_version'] ?? null);
-
-            $updates = [
-                'last_seen_at' => now(),
-                'metadata' => $metadata,
-            ];
-
-            if (($device->name === 'Unknown Garmin Device' || $device->name === '') && ! empty($validated['device_model'])) {
-                $updates['name'] = $validated['device_model'];
-            }
-
-            $device->forceFill($updates)->save();
-        }
-
-        return $device;
-    }
-
-    private function createOrUpdateAthleteActivity(TrackingSession $trackingSession): AthleteActivity
-    {
-        $points = $trackingSession->telemetryPoints()
-            ->orderBy('recorded_at')
-            ->orderBy('id')
-            ->get();
-
-        $latestPoint = $points->last();
-        $firstLocation = $points->first(fn (TelemetryPoint $point) => $point->latitude !== null && $point->longitude !== null);
-        $lastLocation = $points->reverse()->first(fn (TelemetryPoint $point) => $point->latitude !== null && $point->longitude !== null);
-        $distance = $this->lastNonNull($points, 'distance_m');
-        $duration = $this->lastNonNull($points, 'elapsed_time_seconds') ?? $this->lastNonNull($points, 'elapsed_seconds');
-        $averageHeartRate = $this->averageInteger($points, 'heart_rate_bpm') ?? $this->lastNonNull($points, 'avg_heart_rate_bpm');
-        $maxHeartRate = $points->pluck('heart_rate_bpm')->filter(fn ($value) => $value !== null)->max();
-        $averagePace = $this->averagePace($distance, $duration, $points);
-
-        return AthleteActivity::query()->updateOrCreate(
-            ['tracking_session_id' => $trackingSession->id],
-            [
-                'uuid' => $trackingSession->athleteActivity?->uuid ?? (string) str()->uuid(),
-                'athlete_id' => $trackingSession->athlete_id,
-                'sport_id' => $trackingSession->sport_id,
-                'source' => $trackingSession->telemetry_source ?? 'connect_iq',
-                'status' => 'completed',
-                'started_at' => $trackingSession->started_at,
-                'ended_at' => $trackingSession->ended_at,
-                'duration_seconds' => $duration !== null ? (int) $duration : null,
-                'distance_m' => $distance,
-                'average_pace_sec_per_km' => $averagePace,
-                'average_heart_rate_bpm' => $averageHeartRate !== null ? (int) round($averageHeartRate) : null,
-                'max_heart_rate_bpm' => $maxHeartRate !== null ? (int) $maxHeartRate : null,
-                'calories' => $this->lastNonNull($points, 'calories'),
-                'ascent_m' => $this->lastNonNull($points, 'ascent_m'),
-                'descent_m' => $this->lastNonNull($points, 'descent_m'),
-                'start_latitude' => $firstLocation?->latitude,
-                'start_longitude' => $firstLocation?->longitude,
-                'end_latitude' => $lastLocation?->latitude,
-                'end_longitude' => $lastLocation?->longitude,
-                'summary_payload' => [
-                    'telemetry_points_count' => $points->count(),
-                    'latest_telemetry_point_id' => $latestPoint?->id,
-                    'latest_recorded_at' => $latestPoint?->recorded_at?->toIso8601String(),
-                    'final_distance_m' => $distance,
-                    'duration_seconds' => $duration,
-                    'average_heart_rate_bpm' => $averageHeartRate,
-                    'max_heart_rate_bpm' => $maxHeartRate,
-                    'average_pace_sec_per_km' => $averagePace,
-                ],
-            ],
-        );
-    }
-
-    private function lastNonNull($points, string $field): mixed
-    {
-        $point = $points->reverse()->first(fn (TelemetryPoint $point) => $point->{$field} !== null);
-
-        return $point?->{$field};
-    }
-
-    private function averageInteger($points, string $field): ?int
-    {
-        $values = $points->pluck($field)->filter(fn ($value) => $value !== null);
-
-        if ($values->isEmpty()) {
-            return null;
-        }
-
-        return (int) round($values->avg());
-    }
-
-    private function averagePace($distance, $duration, $points): ?int
-    {
-        if (is_numeric($distance) && is_numeric($duration) && (float) $distance > 0 && (int) $duration > 0) {
-            return (int) round(((int) $duration) / (((float) $distance) / 1000));
-        }
-
-        return $this->lastNonNull($points, 'average_pace_sec_per_km')
-            ?? $this->lastNonNull($points, 'pace_sec_per_km');
     }
 
     private function receivedResponse(): JsonResponse

@@ -22,6 +22,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('tracking-sessions/start', [TrackingSessionWebController::class, 'create'])->name('tracking-sessions.create');
     Route::post('tracking-sessions/start', [TrackingSessionWebController::class, 'store'])->name('tracking-sessions.store');
     Route::get('live-sessions', [LiveSessionsController::class, 'index'])->name('live-sessions.index');
+    Route::post('live-sessions/{trackingSession}/complete', [LiveSessionsController::class, 'complete'])->name('live-sessions.complete');
+    Route::post('live-sessions/{trackingSession}/discard', [LiveSessionsController::class, 'discard'])->name('live-sessions.discard');
 });
 
 require __DIR__.'/settings.php';

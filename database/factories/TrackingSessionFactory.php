@@ -31,6 +31,10 @@ class TrackingSessionFactory extends Factory
             'livetrack_source_email' => null,
             'telemetry_source' => 'connect_iq',
             'last_direct_telemetry_at' => null,
+            'last_movement_at' => null,
+            'last_status_changed_at' => null,
+            'notification_suppressed_at' => null,
+            'notification_state' => [],
             'metadata' => [],
         ];
     }

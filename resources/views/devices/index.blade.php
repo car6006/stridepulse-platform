@@ -25,23 +25,38 @@
 
         <div class="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
             @forelse ($devices as $device)
+                @php($duplicateCount = \App\Models\Device::query()->where('id', '!=', $device->id)->where('status', '!=', \App\Models\Device::STATUS_ARCHIVED)->get()->filter(fn ($candidate) => $candidate->pairing_code === $device->pairing_code)->count())
+                @php($online = $device->last_telemetry_at && $device->last_telemetry_at->gt(now()->subSeconds((int) config('stridepulse.tracking.offline_after_seconds', 300))))
                 <div class="flex flex-col gap-4 border-b border-zinc-200 p-5 last:border-b-0 md:flex-row md:items-center md:justify-between dark:border-zinc-700">
                     <div>
                         <h2 class="text-lg font-semibold text-zinc-950 dark:text-white">{{ $device->name }}</h2>
                         <p class="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
                             {{ $device->athlete?->name ?? 'Unassigned athlete' }} · {{ Str::headline($device->provider) }} {{ Str::headline($device->type) }} · {{ Str::headline($device->status) }}
+                            @if (str_contains(Str::lower($device->name.' '.($device->device_uuid ?? '')), 'sim'))
+                                · Simulator
+                            @endif
                         </p>
                         <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
                             Pairing code <span class="font-mono font-semibold text-zinc-950 dark:text-white">{{ $device->pairing_code ?? 'Not generated' }}</span>
                         </p>
+                        @if ($duplicateCount > 0)
+                            <p class="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">Duplicate pairing code detected</p>
+                        @endif
                     </div>
 
                     <div class="flex flex-wrap items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
                         <span>{{ $device->tracking_sessions_count }} sessions</span>
-                        <span>Last seen {{ $device->last_seen_at?->diffForHumans() ?? 'never' }}</span>
+                        <span>{{ $online ? 'Live' : 'Offline' }}</span>
+                        <span>Last telemetry {{ $device->last_telemetry_at?->diffForHumans() ?? 'never' }}</span>
                         <flux:button :href="route('devices.show', $device)" wire:navigate>
                             {{ __('Pairing details') }}
                         </flux:button>
+                        <form method="POST" action="{{ route('devices.archive', $device) }}">
+                            @csrf
+                            <flux:button type="submit" variant="danger">
+                                {{ __('Archive') }}
+                            </flux:button>
+                        </form>
                     </div>
                 </div>
             @empty

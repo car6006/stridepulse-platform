@@ -24,15 +24,15 @@
 
             <div class="space-y-2">
                 <label for="device_id" class="text-sm font-medium text-zinc-800 dark:text-zinc-200">Garmin device</label>
-                <select id="device_id" name="device_id" class="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-950 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
-                    <option value="">Session token only</option>
+                <select id="device_id" name="device_id" required class="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-950 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
+                    <option value="">Select Garmin device</option>
                     @foreach ($devices as $device)
                         <option value="{{ $device->id }}" data-athlete-id="{{ $device->athlete_id }}" @selected(old('device_id') == $device->id)>
-                            {{ $device->athlete?->name }} · {{ $device->name }}
+                            {{ $device->athlete?->name }} · {{ $device->name }} · {{ $device->pairing_code }}
                         </option>
                     @endforeach
                 </select>
-                <p class="text-xs text-zinc-500 dark:text-zinc-400">Choose an active device assigned to the selected athlete to require device UUID and secret on Garmin telemetry.</p>
+                <p class="text-xs text-zinc-500 dark:text-zinc-400">Choose the claimed Garmin device that should receive this session token during watch discovery.</p>
                 @error('device_id')
                     <p class="text-sm text-red-600 dark:text-red-400">{{ $message }}</p>
                 @enderror
@@ -51,13 +51,13 @@
                 @enderror
             </div>
 
-            @if ($athletes->isEmpty() || $sports->isEmpty())
+            @if ($athletes->isEmpty() || $sports->isEmpty() || $devices->isEmpty())
                 <div class="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-                    Create at least one athlete and one sport before starting a tracking session.
+                    Create at least one athlete, one sport, and one claimed Garmin device before starting a tracking session.
                 </div>
             @endif
 
-            <flux:button variant="primary" type="submit" :disabled="$athletes->isEmpty() || $sports->isEmpty()">
+            <flux:button variant="primary" type="submit" :disabled="$athletes->isEmpty() || $sports->isEmpty() || $devices->isEmpty()">
                 {{ __('Start tracking session') }}
             </flux:button>
         </form>

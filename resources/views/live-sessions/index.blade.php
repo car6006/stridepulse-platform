@@ -21,6 +21,8 @@
         <div class="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
             @forelse ($trackingSessions as $trackingSession)
                 @php($liveUrl = route('live.session', $trackingSession->session_token))
+                @php($device = $trackingSession->device)
+                @php($deviceOnline = $device?->last_telemetry_at && $device->last_telemetry_at->gt(now()->subSeconds((int) config('stridepulse.tracking.offline_after_seconds', 300))))
                 <article class="border-b border-zinc-200 p-5 last:border-b-0 dark:border-zinc-700">
                     <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                         <div>
@@ -31,6 +33,19 @@
                                 {{ $trackingSession->sport?->name ? Str::headline($trackingSession->sport->name) : Str::headline((string) $trackingSession->activity_type) }}
                                 · Last seen {{ $trackingSession->last_seen_at?->diffForHumans() ?? 'not yet' }}
                             </p>
+                            <p class="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+                                Device
+                                <span class="font-medium text-zinc-950 dark:text-white">{{ $device?->name ?? 'Unassigned' }}</span>
+                                @if ($device)
+                                    · {{ $deviceOnline ? 'Online' : 'Offline' }}
+                                    · Last telemetry {{ $device->last_telemetry_at?->diffForHumans() ?? 'not yet' }}
+                                @endif
+                            </p>
+                            @if ($device && $device->last_telemetry_at === null)
+                                <p class="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                                    Device assigned but no telemetry has been received.
+                                </p>
+                            @endif
                             <p class="mt-3 break-all rounded-md border border-zinc-200 bg-zinc-50 p-3 font-mono text-xs text-zinc-800 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200">
                                 {{ $liveUrl }}
                             </p>

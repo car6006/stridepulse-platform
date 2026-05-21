@@ -32,7 +32,56 @@
                     <dt class="text-zinc-500 dark:text-zinc-400">Tracking sessions</dt>
                     <dd class="mt-1 font-medium text-zinc-950 dark:text-white">{{ $device->trackingSessions->count() }}</dd>
                 </div>
+                <div>
+                    <dt class="text-zinc-500 dark:text-zinc-400">Last telemetry</dt>
+                    <dd class="mt-1 font-medium text-zinc-950 dark:text-white">{{ $device->last_telemetry_at?->diffForHumans() ?? 'Never' }}</dd>
+                </div>
+                <div>
+                    <dt class="text-zinc-500 dark:text-zinc-400">Device model</dt>
+                    <dd class="mt-1 font-medium text-zinc-950 dark:text-white">{{ $device->metadata['device_model'] ?? $device->name }}</dd>
+                </div>
+                <div>
+                    <dt class="text-zinc-500 dark:text-zinc-400">Type</dt>
+                    <dd class="mt-1 font-medium text-zinc-950 dark:text-white">
+                        {{ Str::headline($device->type) }}
+                        @if (str_contains(Str::lower($device->name.' '.($device->device_uuid ?? '')), 'sim'))
+                            · Simulator
+                        @endif
+                    </dd>
+                </div>
             </dl>
+        </section>
+
+        <section class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
+            <h2 class="text-lg font-semibold text-zinc-950 dark:text-white">Device management</h2>
+            <div class="mt-5 flex flex-col gap-4 lg:flex-row lg:items-end">
+                <form method="POST" action="{{ route('devices.transfer', $device) }}" class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    @csrf
+                    <select name="athlete_id" required class="min-w-56 rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-950 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
+                        <option value="">Transfer to athlete</option>
+                        @foreach ($athletes as $athlete)
+                            <option value="{{ $athlete->id }}" @selected($device->athlete_id === $athlete->id)>{{ $athlete->name }}</option>
+                        @endforeach
+                    </select>
+                    <flux:button type="submit">
+                        {{ __('Transfer ownership') }}
+                    </flux:button>
+                </form>
+
+                <form method="POST" action="{{ route('devices.re-pair', $device) }}">
+                    @csrf
+                    <flux:button type="submit">
+                        {{ __('Re-pair device') }}
+                    </flux:button>
+                </form>
+
+                <form method="POST" action="{{ route('devices.archive', $device) }}">
+                    @csrf
+                    <flux:button type="submit" variant="danger">
+                        {{ __('Archive device') }}
+                    </flux:button>
+                </form>
+            </div>
         </section>
 
         <details class="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">

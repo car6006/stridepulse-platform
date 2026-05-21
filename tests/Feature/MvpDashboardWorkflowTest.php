@@ -78,6 +78,8 @@ test('device can be registered from dashboard', function () {
 
     expect($device->athlete_id)->toBe($athlete->id)
         ->and($device->provider)->toBe('garmin')
+        ->and($device->status)->toBe(Device::STATUS_CLAIMED)
+        ->and($device->last_claimed_at)->not->toBeNull()
         ->and($device->device_secret)->not->toBeEmpty()
         ->and($device->metadata)->toHaveKey('pairing_code');
 });
@@ -110,7 +112,8 @@ test('unclaimed device can be claimed by athlete', function () {
     $device->refresh();
 
     expect($device->athlete_id)->toBe($athlete->id)
-        ->and($device->status)->toBe('active');
+        ->and($device->status)->toBe(Device::STATUS_CLAIMED)
+        ->and($device->last_claimed_at)->not->toBeNull();
 });
 
 test('authenticated user can start and list a tracking session', function () {

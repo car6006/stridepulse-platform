@@ -1,9 +1,9 @@
 <?php
 
-use App\Http\Controllers\LiveSessionController;
 use App\Http\Controllers\AthleteController;
 use App\Http\Controllers\DeviceController;
 use App\Http\Controllers\GarminSetupController;
+use App\Http\Controllers\LiveSessionController;
 use App\Http\Controllers\LiveSessionsController;
 use App\Http\Controllers\TrackingSessionWebController;
 use Illuminate\Support\Facades\Route;
@@ -16,6 +16,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::resource('athletes', AthleteController::class)->except(['show']);
     Route::get('devices/unclaimed', [DeviceController::class, 'unclaimed'])->name('devices.unclaimed');
     Route::post('devices/{device}/claim', [DeviceController::class, 'claim'])->name('devices.claim');
+    Route::post('devices/{device}/archive', [DeviceController::class, 'archive'])->name('devices.archive');
+    Route::post('devices/{device}/re-pair', [DeviceController::class, 'rePair'])->name('devices.re-pair');
+    Route::post('devices/{device}/transfer', [DeviceController::class, 'transfer'])->name('devices.transfer');
     Route::resource('devices', DeviceController::class)->only(['index', 'create', 'store', 'show']);
     Route::get('garmin-setup', [GarminSetupController::class, 'index'])->name('garmin-setup.index');
     Route::post('garmin-setup/token', [GarminSetupController::class, 'generate'])->name('garmin-setup.generate');

@@ -22,6 +22,8 @@ test('unknown device discovery creates unclaimed device', function () {
             'status' => 'unclaimed',
             'device_name' => 'fr965',
             'athlete_name' => null,
+            'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-001'),
+            'session_status' => null,
             'active_session_token' => null,
         ]);
 
@@ -41,6 +43,7 @@ test('known unclaimed device discovery updates last seen and metadata', function
     $device = Device::factory()->create([
         'athlete_id' => null,
         'device_uuid' => 'sp-fr965-discovery-002',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-002'),
         'device_secret' => 'existing-secret',
         'name' => 'Unknown Garmin Device',
         'status' => 'unclaimed',
@@ -72,6 +75,7 @@ test('active device discovery returns the single active session token', function
     $athlete = Athlete::factory()->create(['name' => 'Casey Runner']);
     $device = Device::factory()->for($athlete)->create([
         'device_uuid' => 'sp-fr965-discovery-003',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-003'),
         'device_secret' => 'active-secret',
         'name' => 'Race Watch',
         'status' => 'active',
@@ -91,18 +95,22 @@ test('active device discovery returns the single active session token', function
         ->assertOk()
         ->assertExactJson([
             'ok' => true,
-            'status' => 'active',
+            'status' => 'live',
             'device_name' => 'Race Watch',
             'athlete_name' => 'Casey Runner',
+            'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-003'),
+            'session_status' => 'active',
             'active_session_token' => 'auto-session-token',
         ]);
 
-    expect($device->fresh()->last_seen_at)->not->toBeNull();
+    expect($device->fresh()->last_seen_at)->not->toBeNull()
+        ->and($device->fresh()->status)->toBe(Device::STATUS_LIVE);
 });
 
 test('active device discovery omits session token when multiple active sessions exist', function () {
     $device = Device::factory()->create([
         'device_uuid' => 'sp-fr965-discovery-004',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-004'),
         'device_secret' => 'active-secret',
         'status' => 'active',
     ]);
@@ -119,12 +127,67 @@ test('active device discovery omits session token when multiple active sessions 
         'device_secret' => 'active-secret',
     ]))
         ->assertOk()
+        ->assertJsonPath('status', 'ready')
+        ->assertJsonPath('session_status', null)
         ->assertJsonPath('active_session_token', null);
+});
+
+test('discovery with existing device uuid updates existing row without duplicate', function () {
+    Device::factory()->create([
+        'device_uuid' => 'sp-fr965-discovery-006',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-006'),
+        'device_secret' => 'same-secret',
+        'status' => Device::STATUS_UNCLAIMED,
+        'metadata' => ['app_version' => 'old'],
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'sp-fr965-discovery-006',
+        'device_secret' => 'same-secret',
+        'app_version' => '2.0.0',
+    ]))->assertOk();
+
+    expect(Device::query()->where('device_uuid', 'sp-fr965-discovery-006')->count())->toBe(1)
+        ->and(Device::query()->where('device_uuid', 'sp-fr965-discovery-006')->firstOrFail()->metadata['app_version'])->toBe('2.0.0');
+});
+
+test('new uuid with same pairing code archives old device and preserves active session delivery', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Replacement Runner']);
+    $oldDevice = Device::factory()->for($athlete)->create([
+        'device_uuid' => 'old-device-95db7a',
+        'pairing_code' => '95DB7A',
+        'device_secret' => 'old-secret',
+        'status' => Device::STATUS_READY,
+    ]);
+
+    TrackingSession::factory()->for($athlete)->create([
+        'device_id' => $oldDevice->id,
+        'session_token' => 'replacement-session-token',
+        'status' => 'active',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'new-device-95db7a',
+        'device_secret' => 'new-secret',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('status', 'live')
+        ->assertJsonPath('athlete_name', 'Replacement Runner')
+        ->assertJsonPath('active_session_token', 'replacement-session-token');
+
+    $newDevice = Device::query()->where('device_uuid', 'new-device-95db7a')->firstOrFail();
+
+    expect($oldDevice->fresh()->status)->toBe(Device::STATUS_ARCHIVED)
+        ->and($oldDevice->fresh()->archived_at)->not->toBeNull()
+        ->and($newDevice->athlete_id)->toBe($athlete->id)
+        ->and(TrackingSession::query()->where('session_token', 'replacement-session-token')->firstOrFail()->device_id)->toBe($newDevice->id);
 });
 
 test('active device discovery rejects invalid secret', function () {
     Device::factory()->create([
         'device_uuid' => 'sp-fr965-discovery-005',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-005'),
         'device_secret' => 'correct-secret',
         'status' => 'active',
         'last_seen_at' => null,

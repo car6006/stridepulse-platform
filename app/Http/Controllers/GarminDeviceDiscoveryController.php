@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Device;
+use App\Models\TrackingSession;
 use App\Services\GarminDeviceDiscoveryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -33,30 +34,40 @@ class GarminDeviceDiscoveryController extends Controller
         /** @var Device $device */
         $device->load('athlete');
 
-        $status = $device->status === 'active' ? 'active' : 'unclaimed';
+        $trackingSession = $device->isClaimedForLifecycle()
+            ? $this->singleActiveSession($device)
+            : null;
+
+        if ($device->status !== Device::STATUS_ARCHIVED) {
+            $device->forceFill([
+                'status' => $trackingSession ? Device::STATUS_LIVE : ($device->isClaimedForLifecycle() ? Device::STATUS_READY : Device::STATUS_UNCLAIMED),
+            ])->save();
+        }
 
         return response()->json([
             'ok' => true,
-            'status' => $status,
+            'status' => $device->status,
             'device_name' => $device->name,
             'athlete_name' => $device->athlete?->name,
-            'active_session_token' => $status === 'active' ? $this->singleActiveSessionToken($device) : null,
+            'pairing_code' => $device->pairing_code,
+            'session_status' => $trackingSession?->status,
+            'active_session_token' => $trackingSession?->session_token,
         ]);
     }
 
-    private function singleActiveSessionToken(Device $device): ?string
+    private function singleActiveSession(Device $device): ?TrackingSession
     {
         $sessions = $device->trackingSessions()
             ->where('status', 'active')
             ->whereNull('ended_at')
             ->whereNotNull('session_token')
             ->limit(2)
-            ->get(['session_token']);
+            ->get(['id', 'status', 'session_token']);
 
         if ($sessions->count() !== 1) {
             return null;
         }
 
-        return $sessions->first()->session_token;
+        return $sessions->first();
     }
 }

@@ -17,6 +17,7 @@ class DeviceController extends Controller
             'devices' => Device::query()
                 ->with('athlete')
                 ->withCount('trackingSessions')
+                ->where('status', '!=', Device::STATUS_ARCHIVED)
                 ->latest()
                 ->paginate(15),
         ]);
@@ -26,7 +27,7 @@ class DeviceController extends Controller
     {
         return view('devices.unclaimed', [
             'devices' => Device::query()
-                ->where('status', 'unclaimed')
+                ->where('status', Device::STATUS_UNCLAIMED)
                 ->latest('last_seen_at')
                 ->paginate(15),
             'athletes' => Athlete::query()->orderBy('name')->get(),
@@ -54,13 +55,15 @@ class DeviceController extends Controller
         $device = Device::query()->create([
             'uuid' => $uuid,
             'device_uuid' => $uuid,
+            'pairing_code' => Device::derivePairingCode($uuid),
             'athlete_id' => $validated['athlete_id'],
             'name' => $validated['name'],
             'type' => $validated['type'],
             'provider' => $validated['provider'],
             'device_secret' => Str::random(64),
-            'status' => 'active',
+            'status' => Device::STATUS_CLAIMED,
             'last_seen_at' => null,
+            'last_claimed_at' => now(),
             'metadata' => [
                 'pairing_code' => Device::derivePairingCode($uuid),
             ],
@@ -77,11 +80,12 @@ class DeviceController extends Controller
             'athlete_id' => ['required', 'integer', 'exists:athletes,id'],
         ]);
 
-        abort_unless($device->status === 'unclaimed', 404);
+        abort_unless($device->status === Device::STATUS_UNCLAIMED, 404);
 
         $device->forceFill([
             'athlete_id' => $validated['athlete_id'],
-            'status' => 'active',
+            'status' => Device::STATUS_CLAIMED,
+            'last_claimed_at' => now(),
         ])->save();
 
         return redirect()
@@ -93,6 +97,51 @@ class DeviceController extends Controller
     {
         return view('devices.show', [
             'device' => $device->load('athlete', 'trackingSessions'),
+            'athletes' => Athlete::query()->orderBy('name')->get(),
         ]);
+    }
+
+    public function archive(Device $device): RedirectResponse
+    {
+        $device->forceFill([
+            'status' => Device::STATUS_ARCHIVED,
+            'archived_at' => now(),
+        ])->save();
+
+        return redirect()
+            ->route('devices.index')
+            ->with('status', 'Device archived.');
+    }
+
+    public function rePair(Device $device): RedirectResponse
+    {
+        $device->forceFill([
+            'athlete_id' => null,
+            'status' => Device::STATUS_UNCLAIMED,
+            'last_claimed_at' => null,
+        ])->save();
+
+        return redirect()
+            ->route('devices.show', $device)
+            ->with('status', 'Device is ready to be paired again.');
+    }
+
+    public function transfer(Request $request, Device $device): RedirectResponse
+    {
+        $validated = $request->validate([
+            'athlete_id' => ['required', 'integer', 'exists:athletes,id'],
+        ]);
+
+        abort_if($device->isArchived(), 404);
+
+        $device->forceFill([
+            'athlete_id' => $validated['athlete_id'],
+            'status' => Device::STATUS_CLAIMED,
+            'last_claimed_at' => now(),
+        ])->save();
+
+        return redirect()
+            ->route('devices.show', $device)
+            ->with('status', 'Device ownership transferred.');
     }
 }

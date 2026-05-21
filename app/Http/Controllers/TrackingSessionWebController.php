@@ -17,7 +17,18 @@ class TrackingSessionWebController extends Controller
     {
         return view('tracking-sessions.create', [
             'athletes' => Athlete::query()->orderBy('name')->get(),
-            'devices' => Device::query()->with('athlete')->where('status', 'active')->orderBy('name')->get(),
+            'devices' => Device::query()
+                ->with('athlete')
+                ->whereNotNull('athlete_id')
+                ->whereIn('status', [
+                    Device::STATUS_CLAIMED,
+                    Device::STATUS_READY,
+                    Device::STATUS_LIVE,
+                    Device::STATUS_OFFLINE,
+                    'active',
+                ])
+                ->orderBy('name')
+                ->get(),
             'sports' => Sport::query()->orderBy('name')->get(),
         ]);
     }
@@ -26,20 +37,24 @@ class TrackingSessionWebController extends Controller
     {
         $validated = $request->validate([
             'athlete_id' => ['required', 'integer', 'exists:athletes,id'],
-            'device_id' => ['nullable', 'integer', 'exists:devices,id'],
+            'device_id' => ['required', 'integer', 'exists:devices,id'],
             'sport_id' => ['required', 'integer', 'exists:sports,id'],
         ]);
 
         $sport = Sport::query()->findOrFail($validated['sport_id']);
-        $deviceId = $validated['device_id'] ?? null;
+        $deviceId = $validated['device_id'];
 
-        if ($deviceId !== null) {
-            Device::query()
-                ->whereKey($deviceId)
-                ->where('athlete_id', $validated['athlete_id'])
-                ->where('status', 'active')
-                ->firstOrFail();
-        }
+        Device::query()
+            ->whereKey($deviceId)
+            ->where('athlete_id', $validated['athlete_id'])
+            ->whereIn('status', [
+                Device::STATUS_CLAIMED,
+                Device::STATUS_READY,
+                Device::STATUS_LIVE,
+                Device::STATUS_OFFLINE,
+                'active',
+            ])
+            ->firstOrFail();
 
         $trackingSession = TrackingSession::query()->create([
             'uuid' => (string) Str::uuid(),

@@ -13,7 +13,7 @@ class LiveSessionsController extends Controller
     {
         return view('live-sessions.index', [
             'trackingSessions' => TrackingSession::query()
-                ->with(['athlete', 'sport'])
+                ->with(['athlete', 'sport', 'device'])
                 ->where(function ($query) {
                     $query->where('status', 'active')
                         ->orWhereNull('ended_at');

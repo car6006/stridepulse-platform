@@ -10,6 +10,7 @@ test('garmin pairing code is derived from device uuid', function () {
     $device = Device::factory()->create([
         'provider' => 'garmin',
         'device_uuid' => 'sp-fr965-sim-03d8bb1f107195db7a',
+        'pairing_code' => null,
         'metadata' => [],
     ]);
 
@@ -20,12 +21,17 @@ test('stored pairing code is preferred over derived code', function () {
     $device = Device::factory()->create([
         'provider' => 'garmin',
         'device_uuid' => 'sp-fr965-sim-03d8bb1f107195db7a',
+        'pairing_code' => null,
         'metadata' => [
             'pairing_code' => 'stored1',
         ],
     ]);
 
     expect($device->pairing_code)->toBe('STORED1');
+});
+
+test('derived pairing code excludes ambiguous characters', function () {
+    expect(Device::derivePairingCode('garmin-OO00IIll1122ABCD'))->toBe('22ABCD');
 });
 
 test('device details page displays pairing code and hides raw credentials in advanced section', function () {
@@ -35,6 +41,7 @@ test('device details page displays pairing code and hides raw credentials in adv
         'name' => 'Casey FR965',
         'provider' => 'garmin',
         'device_uuid' => 'sp-fr965-sim-03d8bb1f107195db7a',
+        'pairing_code' => null,
         'metadata' => [],
     ]);
 
@@ -55,6 +62,7 @@ test('device list displays pairing code', function () {
         'name' => 'Casey FR965',
         'provider' => 'garmin',
         'device_uuid' => 'sp-fr965-sim-03d8bb1f107195db7a',
+        'pairing_code' => null,
         'metadata' => [],
     ]);
 
@@ -73,6 +81,7 @@ test('unclaimed devices page displays pairing code', function () {
         'name' => 'fr965_sim',
         'provider' => 'garmin',
         'device_uuid' => 'sp-fr965-sim-03d8bb1f107195db7a',
+        'pairing_code' => null,
         'status' => 'unclaimed',
         'metadata' => [],
     ]);

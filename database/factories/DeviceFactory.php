@@ -18,13 +18,17 @@ class DeviceFactory extends Factory
         return [
             'uuid' => $uuid,
             'device_uuid' => $uuid,
+            'pairing_code' => Device::derivePairingCode($uuid),
             'athlete_id' => Athlete::factory(),
             'name' => 'Garmin '.$this->faker->word(),
             'type' => 'watch',
             'provider' => 'garmin',
             'device_secret' => Str::random(64),
-            'status' => 'active',
+            'status' => Device::STATUS_CLAIMED,
             'last_seen_at' => null,
+            'last_claimed_at' => now(),
+            'last_telemetry_at' => null,
+            'archived_at' => null,
             'metadata' => [],
         ];
     }

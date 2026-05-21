@@ -102,7 +102,10 @@ class GarminTelemetryController extends Controller
 
         if (! $trackingSession) {
             if ($device instanceof Device) {
-                $device->forceFill(['last_seen_at' => now()])->save();
+                $device->forceFill([
+                    'last_seen_at' => now(),
+                    'status' => $device->isClaimedForLifecycle() ? Device::STATUS_READY : $device->status,
+                ])->save();
 
                 Log::info('Garmin device heartbeat without valid tracking session', [
                     'device_id' => $device->id,
@@ -152,7 +155,13 @@ class GarminTelemetryController extends Controller
                     'last_direct_telemetry_at' => now(),
                 ])->save();
 
-                $device?->forceFill(['last_seen_at' => now()])->save();
+                if ($device instanceof Device) {
+                    $device->forceFill([
+                        'last_seen_at' => now(),
+                        'last_telemetry_at' => now(),
+                        'status' => $device->isClaimedForLifecycle() ? Device::STATUS_LIVE : $device->status,
+                    ])->save();
+                }
 
                 return $this->receivedResponse();
             }
@@ -212,7 +221,13 @@ class GarminTelemetryController extends Controller
             'last_seen_at' => now(),
             'last_direct_telemetry_at' => now(),
         ])->save();
-        $device?->forceFill(['last_seen_at' => now()])->save();
+        if ($device instanceof Device) {
+            $device->forceFill([
+                'last_seen_at' => now(),
+                'last_telemetry_at' => now(),
+                'status' => $device->isClaimedForLifecycle() ? Device::STATUS_LIVE : $device->status,
+            ])->save();
+        }
 
         $lifecycle->evaluateAfterTelemetry($trackingSession, $telemetryPoint, $activityState);
 

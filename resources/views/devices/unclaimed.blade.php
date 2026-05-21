@@ -28,18 +28,26 @@
                         </p>
                     </div>
 
-                    <form method="POST" action="{{ route('devices.claim', $device) }}" class="flex flex-col gap-3 sm:flex-row sm:items-center">
-                        @csrf
-                        <select name="athlete_id" required class="min-w-56 rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-950 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
-                            <option value="">Select athlete</option>
-                            @foreach ($athletes as $athlete)
-                                <option value="{{ $athlete->id }}">{{ $athlete->name }}</option>
-                            @endforeach
-                        </select>
-                        <flux:button variant="primary" type="submit" :disabled="$athletes->isEmpty()">
-                            {{ __('Claim') }}
-                        </flux:button>
-                    </form>
+                    <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <form method="POST" action="{{ route('devices.claim', $device) }}" class="flex flex-col gap-3 sm:flex-row sm:items-center">
+                            @csrf
+                            <select name="athlete_id" required class="min-w-56 rounded-md border border-zinc-300 bg-white px-3 py-2 text-zinc-950 shadow-sm focus:border-cyan-600 focus:outline-none focus:ring-2 focus:ring-cyan-600/20 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white">
+                                <option value="">Select athlete</option>
+                                @foreach ($athletes as $athlete)
+                                    <option value="{{ $athlete->id }}">{{ $athlete->name }}</option>
+                                @endforeach
+                            </select>
+                            <flux:button variant="primary" type="submit" :disabled="$athletes->isEmpty()">
+                                {{ __('Claim') }}
+                            </flux:button>
+                        </form>
+                        <form method="POST" action="{{ route('devices.archive', $device) }}">
+                            @csrf
+                            <flux:button type="submit" variant="danger">
+                                {{ __('Archive') }}
+                            </flux:button>
+                        </form>
+                    </div>
                 </div>
             @empty
                 <div class="p-6 text-zinc-600 dark:text-zinc-400">

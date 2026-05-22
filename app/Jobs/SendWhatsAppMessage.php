@@ -6,6 +6,7 @@ use App\Models\WhatsAppMessageDispatch;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class SendWhatsAppMessage implements ShouldQueue
 {
@@ -26,10 +27,33 @@ class SendWhatsAppMessage implements ShouldQueue
         $token = config('services.whatsapp.token');
         $phoneNumberId = config('services.whatsapp.phone_number_id');
 
-        if (blank($token) || blank($phoneNumberId)) {
+        if (blank($token)) {
+            Log::warning('WhatsApp outbound dispatch missing API token', [
+                'dispatch_id' => $dispatch->id,
+                'dedupe_key' => $dispatch->dedupe_key,
+                'phone_number' => $dispatch->phone_number,
+                'config_key' => 'services.whatsapp.token',
+            ]);
+
             $dispatch->forceFill([
                 'status' => WhatsAppMessageDispatch::STATUS_SKIPPED,
-                'last_error' => 'WhatsApp Cloud API credentials are not configured.',
+                'last_error' => 'WhatsApp Cloud API token is not configured.',
+            ])->save();
+
+            return;
+        }
+
+        if (blank($phoneNumberId)) {
+            Log::warning('WhatsApp outbound dispatch missing phone number id', [
+                'dispatch_id' => $dispatch->id,
+                'dedupe_key' => $dispatch->dedupe_key,
+                'phone_number' => $dispatch->phone_number,
+                'config_key' => 'services.whatsapp.phone_number_id',
+            ]);
+
+            $dispatch->forceFill([
+                'status' => WhatsAppMessageDispatch::STATUS_SKIPPED,
+                'last_error' => 'WhatsApp phone number id is not configured.',
             ])->save();
 
             return;
@@ -47,9 +71,24 @@ class SendWhatsAppMessage implements ShouldQueue
 
         $dispatch->increment('attempts');
 
+        Log::info('WhatsApp outbound dispatch sending', [
+            'dispatch_id' => $dispatch->id,
+            'dedupe_key' => $dispatch->dedupe_key,
+            'phone_number' => $dispatch->phone_number,
+            'template_name' => $dispatch->template_name,
+            'phone_number_id' => $phoneNumberId,
+        ]);
+
         $response = Http::withToken($token)
             ->acceptJson()
             ->post("https://graph.facebook.com/v20.0/{$phoneNumberId}/messages", $payload);
+
+        Log::info('WhatsApp outbound dispatch response received', [
+            'dispatch_id' => $dispatch->id,
+            'dedupe_key' => $dispatch->dedupe_key,
+            'status_code' => $response->status(),
+            'successful' => $response->successful(),
+        ]);
 
         if ($response->successful()) {
             $dispatch->forceFill([

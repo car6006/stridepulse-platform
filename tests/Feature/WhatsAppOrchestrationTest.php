@@ -221,21 +221,69 @@ test('dispatch dedupe key prevents duplicate sends', function () {
         ->and(WhatsAppMessageDispatch::query()->where('dedupe_key', 'dedupe-test-key')->firstOrFail()->body)->toBe('First body');
 });
 
-test('queue job skips safely when whatsapp credentials are missing', function () {
+test('queue job skips safely when whatsapp token is missing', function () {
     config([
         'services.whatsapp.token' => null,
-        'services.whatsapp.phone_number_id' => null,
+        'services.whatsapp.phone_number_id' => '123456789',
     ]);
     Http::fake();
 
-    $dispatch = app(WhatsAppDispatchService::class)->sendText('27825550109', 'Credential test', 'missing-credentials-test');
+    $dispatch = app(WhatsAppDispatchService::class)->sendText('27825550109', 'Credential test', 'missing-token-test');
 
     $dispatch->refresh();
 
     expect($dispatch->status)->toBe(WhatsAppMessageDispatch::STATUS_SKIPPED)
-        ->and($dispatch->last_error)->toBe('WhatsApp Cloud API credentials are not configured.');
+        ->and($dispatch->last_error)->toBe('WhatsApp Cloud API token is not configured.');
 
     Http::assertNothingSent();
+});
+
+test('queue job skips safely when whatsapp phone number id is missing', function () {
+    config([
+        'services.whatsapp.token' => 'test-token',
+        'services.whatsapp.phone_number_id' => null,
+    ]);
+    Http::fake();
+
+    $dispatch = app(WhatsAppDispatchService::class)->sendText('27825550110', 'Credential test', 'missing-phone-number-id-test');
+
+    $dispatch->refresh();
+
+    expect($dispatch->status)->toBe(WhatsAppMessageDispatch::STATUS_SKIPPED)
+        ->and($dispatch->last_error)->toBe('WhatsApp phone number id is not configured.');
+
+    Http::assertNothingSent();
+});
+
+test('queue job sends whatsapp message and persists provider message id', function () {
+    config([
+        'services.whatsapp.token' => 'test-token',
+        'services.whatsapp.phone_number_id' => '123456789',
+    ]);
+
+    Http::fake([
+        'https://graph.facebook.com/v20.0/123456789/messages' => Http::response([
+            'messages' => [
+                ['id' => 'wamid.sent.123'],
+            ],
+        ], 200),
+    ]);
+
+    $dispatch = app(WhatsAppDispatchService::class)->sendText('27825550111', 'Send test', 'send-success-test');
+
+    $dispatch->refresh();
+
+    expect($dispatch->status)->toBe(WhatsAppMessageDispatch::STATUS_SENT)
+        ->and($dispatch->provider_message_id)->toBe('wamid.sent.123')
+        ->and($dispatch->sent_at)->not->toBeNull()
+        ->and($dispatch->attempts)->toBe(1);
+
+    Http::assertSent(function ($request) {
+        return $request->url() === 'https://graph.facebook.com/v20.0/123456789/messages'
+            && $request->hasHeader('Authorization', 'Bearer test-token')
+            && $request['to'] === '27825550111'
+            && $request['text']['body'] === 'Send test';
+    });
 });
 
 test('telemetry automation sends deduped checkpoint updates only to opted in followers', function () {

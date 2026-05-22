@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Device;
 use App\Models\TelemetryPoint;
 use App\Models\TrackingSession;
+use App\Services\EventTelemetryAutomationService;
 use App\Services\GarminDeviceDiscoveryService;
 use App\Services\TrackingSessionLifecycleService;
 use Illuminate\Http\JsonResponse;
@@ -19,6 +20,7 @@ class GarminTelemetryController extends Controller
         Request $request,
         TrackingSessionLifecycleService $lifecycle,
         GarminDeviceDiscoveryService $deviceDiscovery,
+        EventTelemetryAutomationService $automation,
     ): JsonResponse {
         $rawBody = $request->getContent();
         $decodedPayload = json_decode($rawBody, true);
@@ -230,6 +232,7 @@ class GarminTelemetryController extends Controller
         }
 
         $lifecycle->evaluateAfterTelemetry($trackingSession, $telemetryPoint, $activityState);
+        $automation->handleTelemetry($trackingSession, $telemetryPoint);
 
         return $this->receivedResponse();
     }

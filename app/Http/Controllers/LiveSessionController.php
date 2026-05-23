@@ -10,7 +10,7 @@ class LiveSessionController extends Controller
     public function show(string $sessionToken): View
     {
         $trackingSession = TrackingSession::query()
-            ->with(['athlete', 'sport'])
+            ->with(['athlete', 'sport', 'device'])
             ->where('session_token', $sessionToken)
             ->firstOrFail();
 

@@ -60,7 +60,7 @@ class GarminTelemetryController extends Controller
             'gps_status' => ['nullable', 'string', 'max:50'],
             'battery_percent' => ['nullable', 'integer', 'min:0', 'max:100'],
             'device_model' => ['nullable', 'string', 'max:255'],
-            'activity_state' => ['nullable', 'string', 'in:active,paused,stopped,completed,discarded,abandoned'],
+            'activity_state' => ['nullable', 'string', 'in:active,resumed,paused,stopped,saved,completed,discarded,abandoned'],
             'raw_payload' => ['nullable', 'array'],
         ]);
 
@@ -88,7 +88,7 @@ class GarminTelemetryController extends Controller
         if (! empty($validated['session_token'])) {
             $trackingSession = TrackingSession::query()
                 ->where('session_token', $validated['session_token'])
-                ->when(in_array($activityState, ['active', 'paused'], true), fn ($query) => $query->whereNull('ended_at'))
+                ->when(in_array($activityState, ['active', 'resumed', 'paused', 'stopped'], true), fn ($query) => $query->whereNull('ended_at'))
                 ->first();
         }
 
@@ -96,7 +96,7 @@ class GarminTelemetryController extends Controller
             $trackingSession = TrackingSession::query()
                 ->where('device_id', $device->id)
                 ->whereNull('ended_at')
-                ->whereIn('status', ['active', 'paused', 'stationary'])
+                ->whereIn('status', ['active', 'resumed', 'paused', 'stopped', 'stationary'])
                 ->latest('started_at')
                 ->latest('id')
                 ->first();

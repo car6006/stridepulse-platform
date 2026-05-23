@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Athlete;
+use App\Models\Device;
 use App\Models\Sport;
 use App\Models\TelemetryPoint;
 use App\Models\TrackingSession;
@@ -28,7 +29,11 @@ test('live session page renders session status and athlete', function () {
 });
 
 test('live session page shows latest telemetry summary', function () {
-    $session = TrackingSession::factory()->create();
+    $session = TrackingSession::factory()->create([
+        'status' => 'active',
+        'last_seen_at' => now(),
+        'ended_at' => null,
+    ]);
 
     TelemetryPoint::factory()->for($session, 'trackingSession')->create([
         'recorded_at' => now()->subMinute(),
@@ -56,21 +61,61 @@ test('live session page shows latest telemetry summary', function () {
         ->assertSee('176')
         ->assertSee('LOCK')
         ->assertSee('82%')
+        ->assertSee('LIVE')
+        ->assertSee('GPS READY')
+        ->assertSee('HR 151 BPM')
         ->assertSee('Location received')
         ->assertSee('-33.9249000')
         ->assertSee('18.4241000');
 });
 
-test('live session page shows livetrack link when available', function () {
+test('live session page shows device status and livetrack link when available', function () {
+    $device = Device::factory()->create([
+        'name' => 'Forerunner 965',
+        'last_telemetry_at' => now()->subSeconds(8),
+    ]);
+
     $session = TrackingSession::factory()->create([
+        'athlete_id' => $device->athlete_id,
+        'device_id' => $device->id,
         'livetrack_url' => 'https://livetrack.garmin.com/session/example',
     ]);
 
     $this->get("/live/{$session->session_token}")
         ->assertOk()
-        ->assertSee('Garmin LiveTrack')
+        ->assertSee('Device Status')
+        ->assertSee('Forerunner 965')
+        ->assertSee('Last telemetry')
+        ->assertDontSee('Garmin LiveTrack')
         ->assertSee('Open LiveTrack')
         ->assertSee('https://livetrack.garmin.com/session/example');
+});
+
+test('live session page shows waiting for movement while telemetry is live', function () {
+    $session = TrackingSession::factory()->create([
+        'status' => 'active',
+        'last_seen_at' => now(),
+        'ended_at' => null,
+    ]);
+
+    TelemetryPoint::factory()->for($session, 'trackingSession')->create([
+        'recorded_at' => now(),
+        'distance_m' => null,
+        'pace_sec_per_km' => null,
+        'heart_rate_bpm' => 118,
+        'cadence' => null,
+        'gps_status' => 'LOCK',
+        'battery_percent' => 91,
+        'latitude' => -33.9249,
+        'longitude' => 18.4241,
+    ]);
+
+    $this->get("/live/{$session->session_token}")
+        ->assertOk()
+        ->assertSee('Waiting for movement')
+        ->assertSee('Movement not detected yet')
+        ->assertSee('Pace appears after movement')
+        ->assertSee('HR 118 BPM');
 });
 
 test('completed live page shows final state', function () {

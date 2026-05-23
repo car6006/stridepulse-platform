@@ -84,7 +84,7 @@ class GarminDeviceDiscoveryController extends Controller
     private function matchingActiveSessions(Device $device): Collection
     {
         return $device->trackingSessions()
-            ->whereIn('status', ['active', 'armed', 'live'])
+            ->whereIn('status', ['active', 'armed', 'live', 'paused', 'stopped', 'stationary'])
             ->whereNull('ended_at')
             ->limit(2)
             ->get(['id', 'athlete_id', 'status', 'session_token']);

@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\Athlete;
 use App\Models\AthleteActivity;
 use App\Models\Device;
 use App\Models\TelemetryPoint;
@@ -228,8 +229,8 @@ test('raw payload is stored', function () {
         ->toBe([
             'hr_raw' => 148,
             'gps_raw' => ['status' => 'LOCK'],
-	        ]);
-	});
+        ]);
+});
 
 test('active telemetry still works', function () {
     $session = TrackingSession::factory()->create([
@@ -247,7 +248,7 @@ test('active telemetry still works', function () {
         ->and(TelemetryPoint::query()->count())->toBe(1);
 });
 
-test('stopped telemetry marks session stopped', function () {
+test('stopped telemetry marks session stopped without ending it', function () {
     $session = TrackingSession::factory()->create([
         'session_token' => 'garmin-session-token',
         'ended_at' => null,
@@ -262,8 +263,66 @@ test('stopped telemetry marks session stopped', function () {
     $session->refresh();
 
     expect($session->status)->toBe('stopped')
-        ->and($session->ended_at?->toIso8601String())->toBe('2026-05-17T18:00:00+00:00')
+        ->and($session->ended_at)->toBeNull()
+        ->and($session->notification_suppressed_at)->toBeNull()
         ->and(AthleteActivity::query()->count())->toBe(0);
+});
+
+test('active telemetry after stopped resumes the same session', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'stopped-before-resume',
+        'activity_state' => 'stopped',
+        'recorded_at' => '2026-05-17T18:00:00Z',
+        'distance_m' => 5000,
+    ]))->assertOk();
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'active-after-stopped',
+        'activity_state' => 'active',
+        'recorded_at' => '2026-05-17T18:01:00Z',
+        'distance_m' => 5050,
+    ]))->assertOk();
+
+    $session->refresh();
+
+    expect($session->status)->toBe('active')
+        ->and($session->ended_at)->toBeNull()
+        ->and($session->notification_suppressed_at)->toBeNull()
+        ->and(TelemetryPoint::query()->where('tracking_session_id', $session->id)->count())->toBe(2);
+});
+
+test('resumed telemetry after paused continues the same session', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'paused-before-resume',
+        'activity_state' => 'paused',
+        'recorded_at' => '2026-05-17T18:00:00Z',
+        'distance_m' => 5000,
+    ]))->assertOk();
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'resumed-after-paused',
+        'activity_state' => 'resumed',
+        'recorded_at' => '2026-05-17T18:01:00Z',
+        'distance_m' => 5050,
+    ]))->assertOk();
+
+    $session->refresh();
+
+    expect($session->status)->toBe('active')
+        ->and($session->ended_at)->toBeNull()
+        ->and(TelemetryPoint::query()->where('tracking_session_id', $session->id)->count())->toBe(2);
 });
 
 test('completed telemetry creates activity record', function () {
@@ -323,6 +382,35 @@ test('completed telemetry creates activity record', function () {
         ->and((float) $activity->start_latitude)->toBe(-33.9)
         ->and((float) $activity->end_latitude)->toBe(-33.91)
         ->and($activity->summary_payload['telemetry_points_count'])->toBe(2);
+});
+
+test('saved telemetry ends session and creates activity record', function () {
+    $session = TrackingSession::factory()->create([
+        'session_token' => 'garmin-session-token',
+        'started_at' => '2026-05-17 17:00:00',
+        'ended_at' => null,
+        'status' => 'active',
+    ]);
+
+    $this->postJson('/api/garmin/telemetry', garminTelemetryPayload([
+        'ingestion_id' => 'activity-saved',
+        'activity_state' => 'saved',
+        'recorded_at' => '2026-05-17T18:00:00Z',
+        'elapsed_seconds' => 3600,
+        'elapsed_time_seconds' => 3600,
+        'distance_m' => 10000,
+    ]))->assertOk();
+
+    $session->refresh();
+    $activity = AthleteActivity::query()->firstOrFail();
+
+    expect($session->status)->toBe('saved')
+        ->and($session->ended_at?->toIso8601String())->toBe('2026-05-17T18:00:00+00:00')
+        ->and($session->notification_suppressed_at)->not->toBeNull()
+        ->and($activity->tracking_session_id)->toBe($session->id)
+        ->and($activity->status)->toBe('completed')
+        ->and($activity->duration_seconds)->toBe(3600)
+        ->and((float) $activity->distance_m)->toBe(10000.0);
 });
 
 test('discarded telemetry marks session ended without creating public final summary', function () {
@@ -396,7 +484,19 @@ test('progress notifications are blocked after terminal states', function (strin
     ]);
 
     expect(app(TrackingSessionLifecycleService::class)->canSendSupporterUpdate($session, 'progress'))->toBeFalse();
-})->with(['stopped', 'completed', 'discarded']);
+})->with(['saved', 'completed', 'discarded', 'abandoned']);
+
+test('stopped sessions are not treated as terminal for telemetry lifecycle', function () {
+    $session = TrackingSession::factory()->create([
+        'status' => 'stopped',
+        'ended_at' => null,
+        'notification_suppressed_at' => null,
+    ]);
+
+    expect(app(TrackingSessionLifecycleService::class)->canSendSupporterUpdate($session, 'progress'))->toBeFalse()
+        ->and($session->fresh()->ended_at)->toBeNull()
+        ->and($session->fresh()->notification_suppressed_at)->toBeNull();
+});
 
 test('stationary alert is allowed only once per cooldown window', function () {
     $service = app(TrackingSessionLifecycleService::class);
@@ -526,7 +626,7 @@ test('telemetry is accepted after device is claimed and session belongs to devic
         'status' => 'unclaimed',
     ]);
 
-    $athlete = \App\Models\Athlete::factory()->create();
+    $athlete = Athlete::factory()->create();
     $device->forceFill([
         'athlete_id' => $athlete->id,
         'status' => 'active',

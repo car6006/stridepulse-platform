@@ -10,18 +10,33 @@ use Illuminate\Support\Carbon;
 class TrackingSessionLifecycleService
 {
     public const STATE_ACTIVE = 'active';
+
     public const STATE_PAUSED = 'paused';
+
     public const STATE_STATIONARY = 'stationary';
+
     public const STATE_STOPPED = 'stopped';
+
+    public const STATE_RESUMED = 'resumed';
+
+    public const STATE_SAVED = 'saved';
+
     public const STATE_COMPLETED = 'completed';
+
     public const STATE_DISCARDED = 'discarded';
+
     public const STATE_ABANDONED = 'abandoned';
 
     public const MESSAGE_PROGRESS = 'progress';
+
     public const MESSAGE_STATIONARY = 'stationary';
+
     public const MESSAGE_STOPPED = 'stopped';
+
     public const MESSAGE_COMPLETED = 'completed';
+
     public const MESSAGE_ABANDONED = 'abandoned';
+
     public const MESSAGE_EMERGENCY = 'emergency';
 
     public function evaluateAfterTelemetry(
@@ -32,6 +47,10 @@ class TrackingSessionLifecycleService
         $trackingSession->refresh();
         $activityState = $activityState ?: self::STATE_ACTIVE;
         $recordedAt = $latestTelemetry->recorded_at ?? now();
+
+        if ($activityState === self::STATE_RESUMED) {
+            $activityState = self::STATE_ACTIVE;
+        }
 
         if ($activityState === self::STATE_PAUSED) {
             return $this->transition($trackingSession, self::STATE_PAUSED, [
@@ -44,13 +63,11 @@ class TrackingSessionLifecycleService
             return $this->transition($trackingSession, self::STATE_STOPPED, [
                 'last_seen_at' => now(),
                 'last_direct_telemetry_at' => now(),
-                'ended_at' => $trackingSession->ended_at ?? $recordedAt,
-                'notification_suppressed_at' => $trackingSession->notification_suppressed_at ?? now(),
             ]);
         }
 
-        if ($activityState === self::STATE_COMPLETED) {
-            $trackingSession = $this->transition($trackingSession, self::STATE_COMPLETED, [
+        if (in_array($activityState, [self::STATE_COMPLETED, self::STATE_SAVED], true)) {
+            $trackingSession = $this->transition($trackingSession, $activityState, [
                 'last_seen_at' => now(),
                 'last_direct_telemetry_at' => now(),
                 'ended_at' => $trackingSession->ended_at ?? $recordedAt,
@@ -362,7 +379,7 @@ class TrackingSessionLifecycleService
     private function hasTerminalState(TrackingSession $trackingSession): bool
     {
         return in_array($trackingSession->status, [
-            self::STATE_STOPPED,
+            self::STATE_SAVED,
             self::STATE_COMPLETED,
             self::STATE_DISCARDED,
             self::STATE_ABANDONED,

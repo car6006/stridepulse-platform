@@ -33,6 +33,9 @@
         : '--';
 
     $lastSeen = $trackingSession->last_seen_at?->diffForHumans() ?? '--';
+    $device = $trackingSession->device;
+    $deviceLastTelemetryAt = $device?->last_telemetry_at ?? $trackingSession->last_direct_telemetry_at ?? $trackingSession->last_seen_at;
+    $deviceLastTelemetryAge = $deviceLastTelemetryAt?->diffForHumans() ?? 'not yet';
     $hasLocation = $latestTelemetry?->latitude !== null && $latestTelemetry?->longitude !== null;
     $mapCenter = $hasLocation
         ? [(float) $latestTelemetry->latitude, (float) $latestTelemetry->longitude]
@@ -57,6 +60,14 @@
         'abandoned' => 'ABANDONED',
         default => $isStale ? 'Offline' : 'Live',
     };
+    $isTelemetryLive = $latestTelemetry !== null && ! $isStale && ! $isEnded;
+    $hasMovementMetrics = $latestTelemetry?->distance_m !== null || $latestTelemetry?->pace_sec_per_km !== null;
+    $gpsReady = $hasLocation || filled($latestTelemetry?->gps_status);
+    $heartRateReady = $latestTelemetry?->heart_rate_bpm !== null;
+    $batteryLabel = $latestTelemetry?->battery_percent !== null ? $latestTelemetry->battery_percent.'%' : null;
+    $deviceStatusLabel = $device
+        ? ($device->status === \App\Models\Device::STATUS_LIVE || $isTelemetryLive ? 'Online' : Str::headline((string) $device->status))
+        : 'Unassigned';
 @endphp
 
 <!DOCTYPE html>
@@ -154,6 +165,39 @@
                 color: #075985;
             }
 
+            .ribbon {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-top: 18px;
+            }
+
+            .ribbon-item {
+                border: 1px solid #cbd5e1;
+                border-radius: 999px;
+                background: #ffffff;
+                color: #344054;
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                font-weight: 800;
+                padding: 8px 11px;
+                text-transform: uppercase;
+            }
+
+            .ribbon-item.on {
+                border-color: #86efac;
+                background: #dcfce7;
+                color: #166534;
+            }
+
+            .ribbon-item.warn {
+                border-color: #fde68a;
+                background: #fef3c7;
+                color: #92400e;
+            }
+
             .notice {
                 margin-top: 16px;
                 border-radius: 8px;
@@ -168,6 +212,12 @@
                 border-color: #b7e4c7;
                 background: #effdf4;
                 color: #166534;
+            }
+
+            .notice.motion {
+                border-color: #bae6fd;
+                background: #f0f9ff;
+                color: #075985;
             }
 
             .grid {
@@ -224,7 +274,7 @@
             }
 
             #live-map {
-                min-height: 360px;
+                min-height: 460px;
                 padding: 0;
                 overflow: hidden;
                 text-align: left;
@@ -240,7 +290,7 @@
             }
 
             .map-loading {
-                min-height: 360px;
+                min-height: 460px;
                 display: grid;
                 place-items: center;
                 padding: 16px;
@@ -256,25 +306,25 @@
 
             .athlete-marker {
                 align-items: center;
-                background: #00a3ff;
-                border: 3px solid #ffffff;
+                background: linear-gradient(135deg, #10b981, #0284c7);
+                border: 4px solid #ffffff;
                 border-radius: 999px;
-                box-shadow: 0 10px 24px rgba(0, 91, 150, 0.34), 0 0 0 8px rgba(0, 163, 255, 0.16);
+                box-shadow: 0 14px 30px rgba(2, 132, 199, 0.34), 0 0 0 10px rgba(16, 185, 129, 0.18);
                 color: #ffffff;
                 display: flex;
                 font-size: 13px;
                 font-weight: 800;
-                height: 30px;
+                height: 34px;
                 justify-content: center;
                 transform: translateZ(0);
                 transition: transform 400ms ease;
-                width: 30px;
+                width: 34px;
             }
 
             .athlete-marker::after {
                 content: "";
-                width: 8px;
-                height: 8px;
+                width: 10px;
+                height: 10px;
                 border-radius: 999px;
                 background: #ffffff;
             }
@@ -337,6 +387,14 @@
                         @endif
                     </p>
                     <p class="subvalue">Session status: {{ $trackingSession->status ?? 'active' }}</p>
+                    <div class="ribbon" aria-label="Live telemetry status">
+                        <span class="ribbon-item {{ $isTelemetryLive ? 'on' : 'warn' }}">{{ $isTelemetryLive ? 'LIVE' : 'WAITING' }}</span>
+                        <span class="ribbon-item {{ $gpsReady ? 'on' : 'warn' }}">GPS {{ $gpsReady ? 'READY' : 'WAITING' }}</span>
+                        <span class="ribbon-item {{ $heartRateReady ? 'on' : 'warn' }}">HR {{ $heartRateReady ? $latestTelemetry->heart_rate_bpm.' BPM' : 'WAITING' }}</span>
+                        @if ($batteryLabel)
+                            <span class="ribbon-item">Battery {{ $batteryLabel }}</span>
+                        @endif
+                    </div>
                     @if ($isStale)
                         <div class="notice">
                             This session is offline or stale. The page refreshes every 60 seconds and will update when new Garmin telemetry arrives.
@@ -357,6 +415,11 @@
                             @endif
                         </div>
                     @endif
+                    @if ($isTelemetryLive && ! $hasMovementMetrics)
+                        <div class="notice motion">
+                            Waiting for movement. Telemetry is live and distance or pace will appear once the activity starts moving.
+                        </div>
+                    @endif
                 </div>
                 <div class="status {{ $isStale ? 'offline' : '' }} {{ $isEnded ? 'ended' : '' }} {{ $isStationary ? 'stationary' : '' }}">{{ $statusLabel }}</div>
             </section>
@@ -368,71 +431,105 @@
                 </article>
                 <article class="panel">
                     <p class="label">Distance</p>
-                    <p class="value">{{ $distanceKm }}</p>
-                    <p class="subvalue">km</p>
+                    @if ($latestTelemetry?->distance_m !== null)
+                        <p class="value">{{ $distanceKm }}</p>
+                        <p class="subvalue">km</p>
+                    @else
+                        <p class="value">Waiting</p>
+                        <p class="subvalue">Movement not detected yet</p>
+                    @endif
                 </article>
                 <article class="panel">
                     <p class="label">Pace</p>
-                    <p class="value">{{ $pace }}</p>
+                    @if ($latestTelemetry?->pace_sec_per_km !== null)
+                        <p class="value">{{ $pace }}</p>
+                    @else
+                        <p class="value">Waiting</p>
+                        <p class="subvalue">Pace appears after movement</p>
+                    @endif
                 </article>
-                <article class="panel">
-                    <p class="label">Average pace</p>
-                    <p class="value">{{ $averagePace }}</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Elapsed time</p>
-                    <p class="value">{{ $elapsedTime }}</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Current speed</p>
-                    <p class="value">{{ $currentSpeed }}</p>
-                    <p class="subvalue">km/h</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Heart rate</p>
-                    <p class="value">{{ $latestTelemetry?->heart_rate_bpm ?? '--' }}</p>
-                    <p class="subvalue">bpm</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Cadence</p>
-                    <p class="value">{{ $latestTelemetry?->cadence ?? '--' }}</p>
-                    <p class="subvalue">spm</p>
-                </article>
-                <article class="panel">
-                    <p class="label">GPS</p>
-                    <p class="value">{{ $latestTelemetry?->gps_status ?? '--' }}</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Battery</p>
-                    <p class="value">{{ $latestTelemetry?->battery_percent !== null ? $latestTelemetry->battery_percent.'%' : '--' }}</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Altitude</p>
-                    <p class="value">{{ $latestTelemetry?->altitude_m !== null ? number_format((float) $latestTelemetry->altitude_m, 0) : '--' }}</p>
-                    <p class="subvalue">m</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Heading</p>
-                    <p class="value">{{ $latestTelemetry?->heading_degrees !== null ? number_format((float) $latestTelemetry->heading_degrees, 0).'°' : '--' }}</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Ascent / descent</p>
-                    <p class="value">
-                        {{ $latestTelemetry?->ascent_m !== null ? number_format((float) $latestTelemetry->ascent_m, 0) : '--' }}
-                        /
-                        {{ $latestTelemetry?->descent_m !== null ? number_format((float) $latestTelemetry->descent_m, 0) : '--' }}
-                    </p>
-                    <p class="subvalue">m</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Calories</p>
-                    <p class="value">{{ $latestTelemetry?->calories ?? '--' }}</p>
-                    <p class="subvalue">kcal</p>
-                </article>
-                <article class="panel">
-                    <p class="label">Lap</p>
-                    <p class="value">{{ $latestTelemetry?->lap_number ?? '--' }}</p>
-                </article>
+                @if ($latestTelemetry?->average_pace_sec_per_km !== null)
+                    <article class="panel">
+                        <p class="label">Average pace</p>
+                        <p class="value">{{ $averagePace }}</p>
+                    </article>
+                @endif
+                @if ($elapsedSeconds !== null)
+                    <article class="panel">
+                        <p class="label">Elapsed time</p>
+                        <p class="value">{{ $elapsedTime }}</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->current_speed_mps !== null)
+                    <article class="panel">
+                        <p class="label">Current speed</p>
+                        <p class="value">{{ $currentSpeed }}</p>
+                        <p class="subvalue">km/h</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->heart_rate_bpm !== null)
+                    <article class="panel">
+                        <p class="label">Heart rate</p>
+                        <p class="value">{{ $latestTelemetry->heart_rate_bpm }}</p>
+                        <p class="subvalue">bpm</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->cadence !== null)
+                    <article class="panel">
+                        <p class="label">Cadence</p>
+                        <p class="value">{{ $latestTelemetry->cadence }}</p>
+                        <p class="subvalue">spm</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->gps_status !== null)
+                    <article class="panel">
+                        <p class="label">GPS</p>
+                        <p class="value">{{ $latestTelemetry->gps_status }}</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->battery_percent !== null)
+                    <article class="panel">
+                        <p class="label">Battery</p>
+                        <p class="value">{{ $latestTelemetry->battery_percent }}%</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->altitude_m !== null)
+                    <article class="panel">
+                        <p class="label">Altitude</p>
+                        <p class="value">{{ number_format((float) $latestTelemetry->altitude_m, 0) }}</p>
+                        <p class="subvalue">m</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->heading_degrees !== null)
+                    <article class="panel">
+                        <p class="label">Heading</p>
+                        <p class="value">{{ number_format((float) $latestTelemetry->heading_degrees, 0) }}°</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->ascent_m !== null || $latestTelemetry?->descent_m !== null)
+                    <article class="panel">
+                        <p class="label">Ascent / descent</p>
+                        <p class="value">
+                            {{ $latestTelemetry?->ascent_m !== null ? number_format((float) $latestTelemetry->ascent_m, 0) : '0' }}
+                            /
+                            {{ $latestTelemetry?->descent_m !== null ? number_format((float) $latestTelemetry->descent_m, 0) : '0' }}
+                        </p>
+                        <p class="subvalue">m</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->calories !== null)
+                    <article class="panel">
+                        <p class="label">Calories</p>
+                        <p class="value">{{ $latestTelemetry->calories }}</p>
+                        <p class="subvalue">kcal</p>
+                    </article>
+                @endif
+                @if ($latestTelemetry?->lap_number !== null)
+                    <article class="panel">
+                        <p class="label">Lap</p>
+                        <p class="value">{{ $latestTelemetry->lap_number }}</p>
+                    </article>
+                @endif
                 <article class="panel">
                     <p class="label">Source</p>
                     <p class="value">{{ $trackingSession->telemetry_source ?? '--' }}</p>
@@ -468,17 +565,20 @@
                 </article>
 
                 <article class="panel wide">
-                    <p class="label">Garmin LiveTrack</p>
+                    <p class="label">Device Status</p>
+                    <p class="value">{{ $device?->name ?? 'No assigned device' }}</p>
+                    <p class="subvalue">
+                        {{ $deviceStatusLabel }}
+                        @if ($device)
+                            · Last telemetry {{ $deviceLastTelemetryAge }}
+                        @endif
+                    </p>
                     @if ($trackingSession->livetrack_url)
-                        <p class="value">Available</p>
                         <p class="subvalue">
                             <a class="link" href="{{ $trackingSession->livetrack_url }}" target="_blank" rel="noopener noreferrer">
                                 Open LiveTrack
                             </a>
                         </p>
-                    @else
-                        <p class="value">--</p>
-                        <p class="subvalue">No LiveTrack link has been received for this session.</p>
                     @endif
                 </article>
             </section>
@@ -623,7 +723,7 @@
                         className: '',
                         html: '<div class="athlete-marker"></div>',
                         iconAnchor: [15, 15],
-                        iconSize: [30, 30],
+                        iconSize: [34, 34],
                     });
 
                     const latLngs = trail.map((point) => [point.lat, point.lng]);

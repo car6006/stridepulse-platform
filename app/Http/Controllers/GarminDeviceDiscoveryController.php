@@ -46,11 +46,17 @@ class GarminDeviceDiscoveryController extends Controller
 
         $tokenReturned = $trackingSession instanceof TrackingSession && filled($trackingSession->session_token);
 
-        Log::info('Garmin device discovery session lookup completed', [
+        $debugSessionIds = $matchingSessions->pluck('id')->values()->all();
+
+        Log::info('garmin.discovery', [
+            'device_uuid_prefix' => $this->deviceUuidPrefix($validated['device_uuid']),
             'device_id' => $device->id,
             'device_status' => $device->status,
-            'matching_active_sessions_count' => $matchingSessions->count(),
+            'athlete_id' => $device->athlete_id,
+            'matching_session_count' => $matchingSessions->count(),
+            'matching_session_ids' => $debugSessionIds,
             'token_returned' => $tokenReturned,
+            'session_status' => $trackingSession?->status,
         ]);
 
         if ($device->status !== Device::STATUS_ARCHIVED) {
@@ -67,6 +73,11 @@ class GarminDeviceDiscoveryController extends Controller
             'pairing_code' => $device->pairing_code,
             'session_status' => $trackingSession?->status,
             'active_session_token' => $tokenReturned ? $trackingSession->session_token : null,
+            'debug_device_id' => $device->id,
+            'debug_device_status' => $device->status,
+            'debug_session_count' => $matchingSessions->count(),
+            'debug_session_ids' => $debugSessionIds,
+            'debug_token_returned' => $tokenReturned,
         ]);
     }
 
@@ -77,5 +88,10 @@ class GarminDeviceDiscoveryController extends Controller
             ->whereNull('ended_at')
             ->limit(2)
             ->get(['id', 'athlete_id', 'status', 'session_token']);
+    }
+
+    private function deviceUuidPrefix(string $deviceUuid): string
+    {
+        return substr($deviceUuid, 0, 12);
     }
 }

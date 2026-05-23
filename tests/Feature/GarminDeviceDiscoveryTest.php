@@ -25,6 +25,11 @@ test('unknown device discovery creates unclaimed device', function () {
             'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-001'),
             'session_status' => null,
             'active_session_token' => null,
+            'debug_device_id' => Device::query()->where('device_uuid', 'sp-fr965-discovery-001')->firstOrFail()->id,
+            'debug_device_status' => Device::STATUS_UNCLAIMED,
+            'debug_session_count' => 0,
+            'debug_session_ids' => [],
+            'debug_token_returned' => false,
         ]);
 
     $device = Device::query()->where('device_uuid', 'sp-fr965-discovery-001')->firstOrFail();
@@ -81,7 +86,7 @@ test('ready device discovery returns the single active session token', function 
         'status' => Device::STATUS_READY,
     ]);
 
-    TrackingSession::factory()->for($athlete)->create([
+    $session = TrackingSession::factory()->for($athlete)->create([
         'device_id' => $device->id,
         'session_token' => 'auto-session-token',
         'status' => 'active',
@@ -101,6 +106,11 @@ test('ready device discovery returns the single active session token', function 
             'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-003'),
             'session_status' => 'active',
             'active_session_token' => 'auto-session-token',
+            'debug_device_id' => $device->id,
+            'debug_device_status' => Device::STATUS_LIVE,
+            'debug_session_count' => 1,
+            'debug_session_ids' => [$session->id],
+            'debug_token_returned' => true,
         ]);
 
     expect($device->fresh()->last_seen_at)->not->toBeNull()

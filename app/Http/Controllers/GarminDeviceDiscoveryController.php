@@ -7,6 +7,8 @@ use App\Models\TrackingSession;
 use App\Services\GarminDeviceDiscoveryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 
 class GarminDeviceDiscoveryController extends Controller
 {
@@ -34,13 +36,26 @@ class GarminDeviceDiscoveryController extends Controller
         /** @var Device $device */
         $device->load('athlete');
 
-        $trackingSession = $device->isClaimedForLifecycle()
-            ? $this->singleActiveSession($device)
+        $matchingSessions = $device->isClaimedForLifecycle()
+            ? $this->matchingActiveSessions($device)
+            : collect();
+
+        $trackingSession = $matchingSessions->count() === 1
+            ? $matchingSessions->first()
             : null;
+
+        $tokenReturned = $trackingSession instanceof TrackingSession && filled($trackingSession->session_token);
+
+        Log::info('Garmin device discovery session lookup completed', [
+            'device_id' => $device->id,
+            'device_status' => $device->status,
+            'matching_active_sessions_count' => $matchingSessions->count(),
+            'token_returned' => $tokenReturned,
+        ]);
 
         if ($device->status !== Device::STATUS_ARCHIVED) {
             $device->forceFill([
-                'status' => $trackingSession ? Device::STATUS_LIVE : ($device->isClaimedForLifecycle() ? Device::STATUS_READY : Device::STATUS_UNCLAIMED),
+                'status' => $tokenReturned ? Device::STATUS_LIVE : ($device->isClaimedForLifecycle() ? Device::STATUS_READY : Device::STATUS_UNCLAIMED),
             ])->save();
         }
 
@@ -48,26 +63,19 @@ class GarminDeviceDiscoveryController extends Controller
             'ok' => true,
             'status' => $device->status,
             'device_name' => $device->name,
-            'athlete_name' => $device->athlete?->name,
+            'athlete_name' => $device->athlete?->name ?? $trackingSession?->athlete?->name,
             'pairing_code' => $device->pairing_code,
             'session_status' => $trackingSession?->status,
-            'active_session_token' => $trackingSession?->session_token,
+            'active_session_token' => $tokenReturned ? $trackingSession->session_token : null,
         ]);
     }
 
-    private function singleActiveSession(Device $device): ?TrackingSession
+    private function matchingActiveSessions(Device $device): Collection
     {
-        $sessions = $device->trackingSessions()
-            ->where('status', 'active')
+        return $device->trackingSessions()
+            ->whereIn('status', ['active', 'armed', 'live'])
             ->whereNull('ended_at')
-            ->whereNotNull('session_token')
             ->limit(2)
-            ->get(['id', 'status', 'session_token']);
-
-        if ($sessions->count() !== 1) {
-            return null;
-        }
-
-        return $sessions->first();
+            ->get(['id', 'athlete_id', 'status', 'session_token']);
     }
 }

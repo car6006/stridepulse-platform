@@ -71,14 +71,14 @@ test('known unclaimed device discovery updates last seen and metadata', function
         ->and($device->metadata['app_version'])->toBe('2.0.0');
 });
 
-test('active device discovery returns the single active session token', function () {
+test('ready device discovery returns the single active session token', function () {
     $athlete = Athlete::factory()->create(['name' => 'Casey Runner']);
     $device = Device::factory()->for($athlete)->create([
         'device_uuid' => 'sp-fr965-discovery-003',
         'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-003'),
         'device_secret' => 'active-secret',
         'name' => 'Race Watch',
-        'status' => 'active',
+        'status' => Device::STATUS_READY,
     ]);
 
     TrackingSession::factory()->for($athlete)->create([
@@ -107,6 +107,60 @@ test('active device discovery returns the single active session token', function
         ->and($device->fresh()->status)->toBe(Device::STATUS_LIVE);
 });
 
+test('claimed device discovery returns the single active session token', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Claimed Runner']);
+    $device = Device::factory()->for($athlete)->create([
+        'device_uuid' => 'sp-fr965-discovery-claimed',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-claimed'),
+        'device_secret' => 'claimed-secret',
+        'name' => 'Claimed Watch',
+        'status' => Device::STATUS_CLAIMED,
+    ]);
+
+    TrackingSession::factory()->for($athlete)->create([
+        'device_id' => $device->id,
+        'session_token' => 'claimed-session-token',
+        'status' => 'active',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'sp-fr965-discovery-claimed',
+        'device_secret' => 'claimed-secret',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('status', Device::STATUS_LIVE)
+        ->assertJsonPath('athlete_name', 'Claimed Runner')
+        ->assertJsonPath('session_status', 'active')
+        ->assertJsonPath('active_session_token', 'claimed-session-token');
+});
+
+test('ready device discovery returns armed session token', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Armed Runner']);
+    $device = Device::factory()->for($athlete)->create([
+        'device_uuid' => 'sp-fr965-discovery-armed',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-armed'),
+        'device_secret' => 'armed-secret',
+        'name' => 'Armed Watch',
+        'status' => Device::STATUS_READY,
+    ]);
+
+    TrackingSession::factory()->for($athlete)->create([
+        'device_id' => $device->id,
+        'session_token' => 'armed-session-token',
+        'status' => 'armed',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'sp-fr965-discovery-armed',
+        'device_secret' => 'armed-secret',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('session_status', 'armed')
+        ->assertJsonPath('active_session_token', 'armed-session-token');
+});
+
 test('active device discovery omits session token when multiple active sessions exist', function () {
     $device = Device::factory()->create([
         'device_uuid' => 'sp-fr965-discovery-004',
@@ -128,6 +182,34 @@ test('active device discovery omits session token when multiple active sessions 
     ]))
         ->assertOk()
         ->assertJsonPath('status', 'ready')
+        ->assertJsonPath('session_status', null)
+        ->assertJsonPath('active_session_token', null);
+});
+
+test('claimed device discovery omits session token when no active session exists', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Waiting Runner']);
+    $device = Device::factory()->for($athlete)->create([
+        'device_uuid' => 'sp-fr965-discovery-no-session',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-no-session'),
+        'device_secret' => 'no-session-secret',
+        'name' => 'Waiting Watch',
+        'status' => Device::STATUS_CLAIMED,
+    ]);
+
+    TrackingSession::factory()->for($athlete)->create([
+        'device_id' => $device->id,
+        'session_token' => 'completed-session-token',
+        'status' => 'completed',
+        'ended_at' => now(),
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'sp-fr965-discovery-no-session',
+        'device_secret' => 'no-session-secret',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('status', Device::STATUS_READY)
+        ->assertJsonPath('athlete_name', 'Waiting Runner')
         ->assertJsonPath('session_status', null)
         ->assertJsonPath('active_session_token', null);
 });

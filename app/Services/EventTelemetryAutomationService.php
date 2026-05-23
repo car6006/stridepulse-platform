@@ -5,9 +5,11 @@ namespace App\Services;
 use App\Models\Event;
 use App\Models\EventEstimation;
 use App\Models\EventFollower;
+use App\Models\SupporterConsent;
 use App\Models\TelemetryAlert;
 use App\Models\TelemetryPoint;
 use App\Models\TrackingSession;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 
 class EventTelemetryAutomationService
@@ -50,7 +52,13 @@ class EventTelemetryAutomationService
             return;
         }
 
-        $km = number_format($checkpoint / 1000, 1);
+        $eventDistance = data_get($event->metadata, 'distance_m');
+        $remainingDistance = is_numeric($eventDistance)
+            ? max(0, (float) $eventDistance - (float) $telemetryPoint->distance_m)
+            : null;
+        $averagePace = $this->averagePaceSecondsPerKm($telemetryPoint);
+        $estimatedFinish = $this->estimatedFinish($telemetryPoint, $remainingDistance, $averagePace);
+        $liveTrackingUrl = route('live.session', $trackingSession->session_token);
 
         $this->triggerAlert(
             $trackingSession,
@@ -60,8 +68,21 @@ class EventTelemetryAutomationService
             [
                 'distance_m' => $telemetryPoint->distance_m,
                 'checkpoint_m' => $checkpoint,
+                'completed_distance_m' => $checkpoint,
+                'remaining_distance_m' => $remainingDistance,
+                'average_pace_sec_per_km' => $averagePace,
+                'estimated_finish_at' => $estimatedFinish?->toIso8601String(),
+                'live_tracking_url' => $liveTrackingUrl,
             ],
-            "{$trackingSession->athlete?->name} has passed {$km} km at {$event->name}.",
+            $this->checkpointMessage(
+                $trackingSession,
+                $event,
+                $checkpoint,
+                $averagePace,
+                $remainingDistance,
+                $estimatedFinish,
+                $liveTrackingUrl,
+            ),
         );
     }
 
@@ -131,6 +152,12 @@ class EventTelemetryAutomationService
         EventFollower::query()
             ->where('event_id', $event->id)
             ->where('status', 'active')
+            ->whereNotNull('opted_in_at')
+            ->whereNull('unsubscribed_at')
+            ->where(function ($query) {
+                $query->whereNull('supporter_consent_id')
+                    ->orWhereHas('consent', fn ($consentQuery) => $consentQuery->where('status', SupporterConsent::STATUS_OPTED_IN));
+            })
             ->each(function (EventFollower $follower) use ($trackingSession, $event, $type, $alert, $message) {
                 $this->dispatch->sendText(
                     $follower->phone_number,
@@ -148,5 +175,66 @@ class EventTelemetryAutomationService
             ->where('tracking_session_id', $trackingSession->id)
             ->where('alert_type', $type)
             ->exists();
+    }
+
+    private function checkpointMessage(
+        TrackingSession $trackingSession,
+        Event $event,
+        int $checkpoint,
+        ?int $averagePace,
+        ?float $remainingDistance,
+        ?CarbonInterface $estimatedFinish,
+        string $liveTrackingUrl,
+    ): string {
+        return implode("\n", [
+            "{$trackingSession->athlete?->name} checkpoint update for {$event->name}",
+            'Completed: '.$this->formatDistance($checkpoint),
+            'Average pace: '.$this->formatPace($averagePace),
+            'Remaining: '.$this->formatDistance($remainingDistance),
+            'Estimated finish: '.($estimatedFinish?->format('H:i') ?? 'calculating'),
+            'Live tracking: '.$liveTrackingUrl,
+        ]);
+    }
+
+    private function averagePaceSecondsPerKm(TelemetryPoint $telemetryPoint): ?int
+    {
+        if (is_numeric($telemetryPoint->average_pace_sec_per_km) && (int) $telemetryPoint->average_pace_sec_per_km > 0) {
+            return (int) $telemetryPoint->average_pace_sec_per_km;
+        }
+
+        $elapsed = $telemetryPoint->elapsed_time_seconds ?? $telemetryPoint->elapsed_seconds;
+
+        if (! is_numeric($elapsed) || ! is_numeric($telemetryPoint->distance_m) || (int) $elapsed <= 0 || (float) $telemetryPoint->distance_m <= 0) {
+            return null;
+        }
+
+        return (int) round(((int) $elapsed) / ((float) $telemetryPoint->distance_m / 1000));
+    }
+
+    private function estimatedFinish(TelemetryPoint $telemetryPoint, ?float $remainingDistance, ?int $averagePace): ?CarbonInterface
+    {
+        if ($remainingDistance === null || $averagePace === null) {
+            return null;
+        }
+
+        return ($telemetryPoint->recorded_at ?? now())->copy()->addSeconds((int) round(($remainingDistance / 1000) * $averagePace));
+    }
+
+    private function formatDistance(float|int|null $distanceM): string
+    {
+        if ($distanceM === null) {
+            return 'unknown';
+        }
+
+        return number_format(((float) $distanceM) / 1000, 1).' km';
+    }
+
+    private function formatPace(?int $secondsPerKm): string
+    {
+        if ($secondsPerKm === null || $secondsPerKm <= 0) {
+            return 'calculating';
+        }
+
+        return sprintf('%d:%02d/km', intdiv($secondsPerKm, 60), $secondsPerKm % 60);
     }
 }

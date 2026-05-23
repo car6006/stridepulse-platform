@@ -287,31 +287,7 @@ test('queue job sends whatsapp message and persists provider message id', functi
 });
 
 test('telemetry automation sends deduped checkpoint updates only to opted in followers', function () {
-    $athlete = Athlete::factory()->create(['name' => 'Race Athlete']);
-    $event = Event::factory()->create([
-        'name' => 'Race Day',
-        'metadata' => ['distance_m' => 10000],
-    ]);
-    $raceEntry = RaceEntry::factory()->for($event)->for($athlete)->create();
-    $session = TrackingSession::factory()->for($athlete)->for($raceEntry)->create([
-        'session_token' => 'whatsapp-telemetry-session',
-        'status' => 'active',
-        'ended_at' => null,
-    ]);
-    $supporter = Supporter::query()->create([
-        'uuid' => (string) str()->uuid(),
-        'name' => 'Supporter',
-        'phone_number' => '27825550105',
-    ]);
-
-    EventFollower::query()->create([
-        'event_id' => $event->id,
-        'athlete_id' => $athlete->id,
-        'supporter_id' => $supporter->id,
-        'phone_number' => '27825550105',
-        'status' => 'active',
-        'opted_in_at' => now(),
-    ]);
+    createWhatsAppProgressSession(eventDistanceM: 10000, supporterPhone: '27825550105');
 
     $payload = garminWhatsappTelemetryPayload([
         'session_token' => 'whatsapp-telemetry-session',
@@ -325,6 +301,112 @@ test('telemetry automation sends deduped checkpoint updates only to opted in fol
 
     expect(TelemetryAlert::query()->where('alert_type', 'checkpoint_progress')->count())->toBe(1)
         ->and(WhatsAppMessageDispatch::query()->where('phone_number', '27825550105')->where('dedupe_key', 'like', 'event_update:checkpoint_progress:%')->count())->toBe(1);
+});
+
+test('checkpoint progress sends no update before 5km', function () {
+    createWhatsAppProgressSession(eventDistanceM: 10000, supporterPhone: '27825550120');
+
+    $this->postJson('/api/garmin/telemetry', garminWhatsappTelemetryPayload([
+        'session_token' => 'whatsapp-telemetry-session',
+        'distance_m' => 4900,
+        'elapsed_seconds' => null,
+        'elapsed_time_seconds' => null,
+        'gps_status' => null,
+    ]))->assertOk();
+
+    expect(TelemetryAlert::query()->where('alert_type', 'checkpoint_progress')->count())->toBe(0)
+        ->and(WhatsAppMessageDispatch::query()->where('phone_number', '27825550120')->count())->toBe(0);
+});
+
+test('checkpoint progress sends update at 5km with supporter context', function () {
+    $session = createWhatsAppProgressSession(eventDistanceM: 10000, supporterPhone: '27825550121');
+
+    $this->postJson('/api/garmin/telemetry', garminWhatsappTelemetryPayload([
+        'session_token' => 'whatsapp-telemetry-session',
+        'distance_m' => 5000,
+        'elapsed_time_seconds' => 1800,
+        'gps_status' => null,
+    ]))->assertOk();
+
+    $dispatch = WhatsAppMessageDispatch::query()
+        ->where('phone_number', '27825550121')
+        ->where('dedupe_key', 'like', 'event_update:checkpoint_progress:%')
+        ->firstOrFail();
+
+    expect(TelemetryAlert::query()->where('alert_type', 'checkpoint_progress')->count())->toBe(1)
+        ->and($dispatch->body)->toContain('Race Athlete checkpoint update for Race Day')
+        ->and($dispatch->body)->toContain('Completed: 5.0 km')
+        ->and($dispatch->body)->toContain('Average pace: 6:00/km')
+        ->and($dispatch->body)->toContain('Remaining: 5.0 km')
+        ->and($dispatch->body)->toContain('Estimated finish: 10:30')
+        ->and($dispatch->body)->toContain(route('live.session', $session->session_token));
+});
+
+test('checkpoint progress does not duplicate at 5 point 1km', function () {
+    createWhatsAppProgressSession(eventDistanceM: 10000, supporterPhone: '27825550122');
+
+    $this->postJson('/api/garmin/telemetry', garminWhatsappTelemetryPayload([
+        'session_token' => 'whatsapp-telemetry-session',
+        'ingestion_id' => 'checkpoint-5km',
+        'distance_m' => 5000,
+        'elapsed_time_seconds' => 1800,
+        'gps_status' => null,
+    ]))->assertOk();
+
+    $this->postJson('/api/garmin/telemetry', garminWhatsappTelemetryPayload([
+        'session_token' => 'whatsapp-telemetry-session',
+        'ingestion_id' => 'checkpoint-5-1km',
+        'distance_m' => 5100,
+        'elapsed_time_seconds' => 1836,
+        'gps_status' => null,
+    ]))->assertOk();
+
+    expect(TelemetryAlert::query()->where('alert_type', 'checkpoint_progress')->count())->toBe(1)
+        ->and(WhatsAppMessageDispatch::query()->where('phone_number', '27825550122')->where('dedupe_key', 'like', 'event_update:checkpoint_progress:%')->count())->toBe(1);
+});
+
+test('checkpoint progress sends another update at 10km', function () {
+    createWhatsAppProgressSession(eventDistanceM: 15000, supporterPhone: '27825550123');
+
+    $this->postJson('/api/garmin/telemetry', garminWhatsappTelemetryPayload([
+        'session_token' => 'whatsapp-telemetry-session',
+        'ingestion_id' => 'checkpoint-5km',
+        'distance_m' => 5000,
+        'elapsed_time_seconds' => 1800,
+        'gps_status' => null,
+    ]))->assertOk();
+
+    $this->postJson('/api/garmin/telemetry', garminWhatsappTelemetryPayload([
+        'session_token' => 'whatsapp-telemetry-session',
+        'ingestion_id' => 'checkpoint-10km',
+        'distance_m' => 10000,
+        'elapsed_time_seconds' => 3600,
+        'gps_status' => null,
+    ]))->assertOk();
+
+    expect(TelemetryAlert::query()->where('alert_type', 'checkpoint_progress')->count())->toBe(2)
+        ->and(WhatsAppMessageDispatch::query()->where('phone_number', '27825550123')->where('dedupe_key', 'like', 'event_update:checkpoint_progress:%')->count())->toBe(2)
+        ->and(TelemetryAlert::query()->where('dedupe_key', 'checkpoint_progress:'.TrackingSession::query()->firstOrFail()->id.':10000')->exists())->toBeTrue();
+});
+
+test('checkpoint progress does not send to declined supporter', function () {
+    createWhatsAppProgressSession(
+        eventDistanceM: 10000,
+        supporterPhone: '27825550124',
+        followerStatus: 'declined',
+        consentStatus: SupporterConsent::STATUS_DECLINED,
+        optedIn: false,
+    );
+
+    $this->postJson('/api/garmin/telemetry', garminWhatsappTelemetryPayload([
+        'session_token' => 'whatsapp-telemetry-session',
+        'distance_m' => 5000,
+        'elapsed_time_seconds' => 1800,
+        'gps_status' => null,
+    ]))->assertOk();
+
+    expect(TelemetryAlert::query()->where('alert_type', 'checkpoint_progress')->count())->toBe(1)
+        ->and(WhatsAppMessageDispatch::query()->where('phone_number', '27825550124')->where('dedupe_key', 'like', 'event_update:checkpoint_progress:%')->exists())->toBeFalse();
 });
 
 test('telemetry hook leaves non event garmin ingestion path untouched', function () {
@@ -384,4 +466,51 @@ function garminWhatsappTelemetryPayload(array $overrides = []): array
         'gps_status' => 'LOCK',
         'battery_percent' => 90,
     ], $overrides);
+}
+
+function createWhatsAppProgressSession(
+    int $eventDistanceM,
+    string $supporterPhone,
+    string $followerStatus = 'active',
+    string $consentStatus = SupporterConsent::STATUS_OPTED_IN,
+    bool $optedIn = true,
+): TrackingSession {
+    $athlete = Athlete::factory()->create(['name' => 'Race Athlete']);
+    $event = Event::factory()->create([
+        'name' => 'Race Day',
+        'metadata' => ['distance_m' => $eventDistanceM],
+    ]);
+    $raceEntry = RaceEntry::factory()->for($event)->for($athlete)->create();
+    $session = TrackingSession::factory()->for($athlete)->for($raceEntry)->create([
+        'session_token' => 'whatsapp-telemetry-session',
+        'status' => 'active',
+        'ended_at' => null,
+    ]);
+    $supporter = Supporter::query()->create([
+        'uuid' => (string) str()->uuid(),
+        'name' => 'Supporter',
+        'phone_number' => $supporterPhone,
+    ]);
+    $consent = SupporterConsent::query()->create([
+        'event_id' => $event->id,
+        'supporter_id' => $supporter->id,
+        'phone_number' => $supporterPhone,
+        'status' => $consentStatus,
+        'source' => 'whatsapp',
+        'consented_at' => $optedIn ? now() : null,
+        'revoked_at' => $optedIn ? null : now(),
+    ]);
+
+    EventFollower::query()->create([
+        'event_id' => $event->id,
+        'athlete_id' => $athlete->id,
+        'supporter_id' => $supporter->id,
+        'supporter_consent_id' => $consent->id,
+        'phone_number' => $supporterPhone,
+        'status' => $followerStatus,
+        'opted_in_at' => $optedIn ? now() : null,
+        'unsubscribed_at' => $followerStatus === 'unsubscribed' ? now() : null,
+    ]);
+
+    return $session;
 }

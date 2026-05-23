@@ -145,6 +145,39 @@ test('claimed device discovery returns the single active session token', functio
         ->assertJsonPath('active_session_token', 'claimed-session-token');
 });
 
+test('ready claimed device binds unassigned athlete session and returns token', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Unbound Runner']);
+    $device = Device::factory()->for($athlete)->create([
+        'device_uuid' => 'sp-fr965-discovery-unbound',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-unbound'),
+        'device_secret' => 'unbound-secret',
+        'name' => 'Unbound Watch',
+        'status' => Device::STATUS_READY,
+    ]);
+
+    $session = TrackingSession::factory()->for($athlete)->create([
+        'device_id' => null,
+        'session_token' => 'unbound-session-token',
+        'status' => 'active',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'sp-fr965-discovery-unbound',
+        'device_secret' => 'unbound-secret',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('status', Device::STATUS_LIVE)
+        ->assertJsonPath('athlete_name', 'Unbound Runner')
+        ->assertJsonPath('session_status', 'active')
+        ->assertJsonPath('active_session_token', 'unbound-session-token')
+        ->assertJsonPath('debug_session_count', 1)
+        ->assertJsonPath('debug_session_ids', [$session->id])
+        ->assertJsonPath('debug_token_returned', true);
+
+    expect($session->fresh()->device_id)->toBe($device->id);
+});
+
 test('ready device discovery returns armed session token', function () {
     $athlete = Athlete::factory()->create(['name' => 'Armed Runner']);
     $device = Device::factory()->for($athlete)->create([
@@ -196,6 +229,35 @@ test('active device discovery omits session token when multiple active sessions 
         ->assertJsonPath('active_session_token', null);
 });
 
+test('multiple active sessions for athlete returns no token', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Ambiguous Runner']);
+    $device = Device::factory()->for($athlete)->create([
+        'device_uuid' => 'sp-fr965-discovery-ambiguous-athlete',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-ambiguous-athlete'),
+        'device_secret' => 'ambiguous-secret',
+        'status' => Device::STATUS_READY,
+    ]);
+
+    TrackingSession::factory()->count(2)->for($athlete)->create([
+        'device_id' => null,
+        'status' => 'active',
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'sp-fr965-discovery-ambiguous-athlete',
+        'device_secret' => 'ambiguous-secret',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('status', Device::STATUS_READY)
+        ->assertJsonPath('session_status', null)
+        ->assertJsonPath('active_session_token', null)
+        ->assertJsonPath('debug_session_count', 2)
+        ->assertJsonPath('debug_token_returned', false);
+
+    expect(TrackingSession::query()->where('athlete_id', $athlete->id)->where('device_id', $device->id)->exists())->toBeFalse();
+});
+
 test('claimed device discovery omits session token when no active session exists', function () {
     $athlete = Athlete::factory()->create(['name' => 'Waiting Runner']);
     $device = Device::factory()->for($athlete)->create([
@@ -223,6 +285,74 @@ test('claimed device discovery omits session token when no active session exists
         ->assertJsonPath('session_status', null)
         ->assertJsonPath('active_session_token', null);
 });
+
+test('discarded and completed sessions return no discovery token', function () {
+    $athlete = Athlete::factory()->create(['name' => 'Finished Runner']);
+    $device = Device::factory()->for($athlete)->create([
+        'device_uuid' => 'sp-fr965-discovery-finished',
+        'pairing_code' => Device::derivePairingCode('sp-fr965-discovery-finished'),
+        'device_secret' => 'finished-secret',
+        'name' => 'Finished Watch',
+        'status' => Device::STATUS_READY,
+    ]);
+
+    TrackingSession::factory()->for($athlete)->create([
+        'device_id' => $device->id,
+        'session_token' => 'completed-token',
+        'status' => 'completed',
+        'ended_at' => now(),
+    ]);
+
+    TrackingSession::factory()->for($athlete)->create([
+        'device_id' => null,
+        'session_token' => 'discarded-token',
+        'status' => 'discarded',
+        'ended_at' => now(),
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => 'sp-fr965-discovery-finished',
+        'device_secret' => 'finished-secret',
+    ]))
+        ->assertOk()
+        ->assertJsonPath('status', Device::STATUS_READY)
+        ->assertJsonPath('session_status', null)
+        ->assertJsonPath('active_session_token', null)
+        ->assertJsonPath('debug_session_count', 0)
+        ->assertJsonPath('debug_session_ids', [])
+        ->assertJsonPath('debug_token_returned', false);
+});
+
+test('paused and stopped resumable sessions return discovery token', function (string $status, string $token) {
+    $athlete = Athlete::factory()->create(['name' => 'Resumable Runner']);
+    $device = Device::factory()->for($athlete)->create([
+        'device_uuid' => "sp-fr965-discovery-{$status}",
+        'pairing_code' => Device::derivePairingCode("sp-fr965-discovery-{$status}"),
+        'device_secret' => "{$status}-secret",
+        'name' => 'Resumable Watch',
+        'status' => Device::STATUS_READY,
+    ]);
+
+    TrackingSession::factory()->for($athlete)->create([
+        'device_id' => $device->id,
+        'session_token' => $token,
+        'status' => $status,
+        'ended_at' => null,
+    ]);
+
+    $this->postJson('/api/garmin/device-discovery', garminDeviceDiscoveryPayload([
+        'device_uuid' => "sp-fr965-discovery-{$status}",
+        'device_secret' => "{$status}-secret",
+    ]))
+        ->assertOk()
+        ->assertJsonPath('status', Device::STATUS_LIVE)
+        ->assertJsonPath('session_status', $status)
+        ->assertJsonPath('active_session_token', $token)
+        ->assertJsonPath('debug_token_returned', true);
+})->with([
+    ['paused', 'paused-session-token'],
+    ['stopped', 'stopped-session-token'],
+]);
 
 test('discovery with existing device uuid updates existing row without duplicate', function () {
     Device::factory()->create([

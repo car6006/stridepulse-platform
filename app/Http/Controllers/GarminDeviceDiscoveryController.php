@@ -36,14 +36,17 @@ class GarminDeviceDiscoveryController extends Controller
         /** @var Device $device */
         $device->load('athlete');
 
-        $matchingSessions = $device->isClaimedForLifecycle()
-            ? $this->matchingActiveSessions($device)
-            : collect();
+        $resolution = $device->isClaimedForLifecycle()
+            ? $this->resolveActiveSession($device)
+            : [
+                'session' => null,
+                'sessions' => collect(),
+                'matched_by' => 'none',
+            ];
 
-        $trackingSession = $matchingSessions->count() === 1
-            ? $matchingSessions->first()
-            : null;
-
+        /** @var Collection $matchingSessions */
+        $matchingSessions = $resolution['sessions'];
+        $trackingSession = $resolution['session'];
         $tokenReturned = $trackingSession instanceof TrackingSession && filled($trackingSession->session_token);
 
         $debugSessionIds = $matchingSessions->pluck('id')->values()->all();
@@ -55,6 +58,7 @@ class GarminDeviceDiscoveryController extends Controller
             'athlete_id' => $device->athlete_id,
             'matching_session_count' => $matchingSessions->count(),
             'matching_session_ids' => $debugSessionIds,
+            'matched_by' => $resolution['matched_by'],
             'token_returned' => $tokenReturned,
             'session_status' => $trackingSession?->status,
         ]);
@@ -81,13 +85,93 @@ class GarminDeviceDiscoveryController extends Controller
         ]);
     }
 
-    private function matchingActiveSessions(Device $device): Collection
+    private function resolveActiveSession(Device $device): array
     {
-        return $device->trackingSessions()
+        $deviceSessions = $this->activeSessionQuery()
+            ->where('device_id', $device->id)
+            ->get();
+
+        if ($deviceSessions->count() === 1) {
+            return [
+                'session' => $deviceSessions->first(),
+                'sessions' => $deviceSessions,
+                'matched_by' => 'device_id',
+            ];
+        }
+
+        if ($deviceSessions->count() > 1 || ! $device->athlete_id) {
+            return [
+                'session' => null,
+                'sessions' => $deviceSessions,
+                'matched_by' => $deviceSessions->count() > 1 ? 'ambiguous' : 'none',
+            ];
+        }
+
+        $unboundSessions = $this->activeSessionQuery()
+            ->where('athlete_id', $device->athlete_id)
+            ->whereNull('device_id')
+            ->get();
+
+        if ($unboundSessions->count() === 1) {
+            $session = $unboundSessions->first();
+            $session->forceFill(['device_id' => $device->id])->save();
+
+            return [
+                'session' => $session->fresh(),
+                'sessions' => collect([$session->fresh()]),
+                'matched_by' => 'athlete_unbound',
+            ];
+        }
+
+        if ($unboundSessions->count() > 1) {
+            return [
+                'session' => null,
+                'sessions' => $unboundSessions,
+                'matched_by' => 'ambiguous',
+            ];
+        }
+
+        $otherDeviceSessions = $this->activeSessionQuery()
+            ->where('athlete_id', $device->athlete_id)
+            ->whereNotNull('device_id')
+            ->where('device_id', '!=', $device->id)
+            ->get();
+
+        if ($otherDeviceSessions->count() === 1) {
+            $session = $otherDeviceSessions->first();
+
+            Log::warning('garmin.discovery.session_device_reassigned', [
+                'device_id' => $device->id,
+                'previous_device_id' => $session->device_id,
+                'athlete_id' => $device->athlete_id,
+                'tracking_session_id' => $session->id,
+            ]);
+
+            $session->forceFill(['device_id' => $device->id])->save();
+
+            return [
+                'session' => $session->fresh(),
+                'sessions' => collect([$session->fresh()]),
+                'matched_by' => 'device_id',
+            ];
+        }
+
+        return [
+            'session' => null,
+            'sessions' => $otherDeviceSessions,
+            'matched_by' => $otherDeviceSessions->count() > 1 ? 'ambiguous' : 'none',
+        ];
+    }
+
+    private function activeSessionQuery()
+    {
+        return TrackingSession::query()
             ->whereIn('status', ['active', 'armed', 'live', 'paused', 'stopped', 'stationary'])
             ->whereNull('ended_at')
-            ->limit(2)
-            ->get(['id', 'athlete_id', 'status', 'session_token']);
+            ->whereNotNull('session_token')
+            ->orderBy('started_at')
+            ->orderBy('id')
+            ->limit(2);
     }
 
     private function deviceUuidPrefix(string $deviceUuid): string

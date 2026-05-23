@@ -14,6 +14,8 @@ class Athlete extends Model
     protected $casts = [
         'uuid' => 'string',
         'metadata' => 'array',
+        'consent_popia_at' => 'datetime',
+        'consent_terms_at' => 'datetime',
     ];
 
     public function coaches()

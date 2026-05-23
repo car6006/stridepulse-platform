@@ -2,7 +2,6 @@
 
 namespace App\Services;
 
-use App\Models\Athlete;
 use App\Models\Device;
 use App\Models\Event;
 use App\Models\EventFollower;
@@ -20,7 +19,11 @@ use Illuminate\Support\Str;
 
 class WhatsAppConversationService
 {
-    public function __construct(private WhatsAppDispatchService $dispatch) {}
+    public function __construct(
+        private WhatsAppDispatchService $dispatch,
+        private PhoneNumberNormalizer $phoneNumbers,
+        private WhatsAppIdentityResolver $identity,
+    ) {}
 
     public function handleInboundText(string $phoneNumber, string $text, array $payload = [], ?string $profileName = null, ?string $providerMessageId = null): WhatsAppConversation
     {
@@ -81,26 +84,45 @@ class WhatsAppConversationService
 
     private function conversationFor(string $phoneNumber, ?string $profileName): WhatsAppConversation
     {
-        $conversation = WhatsAppConversation::query()->firstOrNew(['phone_number' => $phoneNumber]);
+        $normalizedPhoneNumber = $this->phoneNumbers->normalize($phoneNumber);
+        $conversationPhoneNumber = $normalizedPhoneNumber ?? $phoneNumber;
+        $athlete = $this->identity->resolve($phoneNumber, $profileName);
+
+        $conversation = WhatsAppConversation::query()
+            ->whereIn('phone_number', array_values(array_unique([$conversationPhoneNumber, $phoneNumber])))
+            ->first();
+
+        if (! $conversation) {
+            $conversation = new WhatsAppConversation([
+                'phone_number' => $conversationPhoneNumber,
+            ]);
+        }
 
         if (! $conversation->exists) {
-            $athlete = Athlete::query()->create([
-                'uuid' => (string) Str::uuid(),
-                'name' => $profileName ?: 'WhatsApp '.$this->lastDigits($phoneNumber),
-                'metadata' => [
-                    'whatsapp_phone' => $phoneNumber,
-                    'source' => 'whatsapp',
-                ],
-            ]);
-
             $conversation->fill([
-                'athlete_id' => $athlete->id,
+                'athlete_id' => $athlete?->id,
                 'profile_name' => $profileName,
                 'state' => WhatsAppConversation::STATE_IDLE,
                 'context' => [],
             ])->save();
-        } elseif ($profileName && $conversation->profile_name !== $profileName) {
-            $conversation->forceFill(['profile_name' => $profileName])->save();
+        } else {
+            $updates = [];
+
+            if ($normalizedPhoneNumber !== null && $conversation->phone_number !== $normalizedPhoneNumber) {
+                $updates['phone_number'] = $normalizedPhoneNumber;
+            }
+
+            if ($athlete && (int) $conversation->athlete_id !== (int) $athlete->id) {
+                $updates['athlete_id'] = $athlete->id;
+            }
+
+            if ($profileName && $conversation->profile_name !== $profileName) {
+                $updates['profile_name'] = $profileName;
+            }
+
+            if ($updates !== []) {
+                $conversation->forceFill($updates)->save();
+            }
         }
 
         return $conversation->fresh('athlete');

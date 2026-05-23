@@ -305,7 +305,7 @@ class WhatsAppConversationService
 
             $this->dispatch->sendTemplate(
                 $number,
-                config('stridepulse.whatsapp.templates.supporter_invite', 'supporter_invite'),
+                WhatsAppTemplateRegistry::SUPPORTER_INVITE,
                 "supporter_invite:{$invitation->id}",
                 [$athlete->name, $event->name],
                 event: $event,

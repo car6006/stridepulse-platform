@@ -14,6 +14,7 @@ use App\Models\WhatsAppConversation;
 use App\Models\WhatsAppMessage;
 use App\Models\WhatsAppMessageDispatch;
 use App\Services\WhatsAppDispatchService;
+use App\Services\WhatsAppTemplateRegistry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 
@@ -82,6 +83,8 @@ test('trackme workflow rejects invalid date distance and supporter numbers with 
 });
 
 test('trackme consent arms event session and supporter invitations', function () {
+    config(['stridepulse.whatsapp.templates.supporter_invite' => 'supporter_invite']);
+
     $athlete = Athlete::factory()->create([
         'name' => 'Collen Runner',
         'metadata' => ['whatsapp_phone' => '27820000002'],
@@ -283,6 +286,63 @@ test('queue job sends whatsapp message and persists provider message id', functi
             && $request->hasHeader('Authorization', 'Bearer test-token')
             && $request['to'] === '27825550111'
             && $request['text']['body'] === 'Send test';
+    });
+});
+
+test('whatsapp template registry resolves configured template payload', function () {
+    config([
+        'stridepulse.whatsapp.templates.supporter_invite' => 'supporter_invite_prod',
+        'services.whatsapp.language' => 'en',
+    ]);
+
+    $payload = app(WhatsAppTemplateRegistry::class)->payload(
+        WhatsAppTemplateRegistry::SUPPORTER_INVITE,
+        '27825550112',
+        ['Race Athlete', 'Race Day'],
+    );
+
+    expect(data_get($payload, 'template.name'))->toBe('supporter_invite_prod')
+        ->and(data_get($payload, 'template.language.code'))->toBe('en')
+        ->and(data_get($payload, 'template.components.0.parameters.0.text'))->toBe('Race Athlete');
+});
+
+test('whatsapp test template command sends configured payload directly', function () {
+    config([
+        'services.whatsapp.token' => 'test-token',
+        'services.whatsapp.phone_number_id' => '123456789',
+        'services.whatsapp.business_account_id' => '987654321',
+        'services.whatsapp.language' => 'en',
+        'stridepulse.whatsapp.templates.supporter_invite' => 'supporter_invite_prod',
+    ]);
+
+    Http::fake([
+        'https://graph.facebook.com/v20.0/123456789/messages' => Http::response([
+            'messages' => [
+                ['id' => 'wamid.template.test'],
+            ],
+        ], 200),
+    ]);
+
+    $this->artisan('whatsapp:test-template', [
+        'template_key' => 'supporter_invite',
+        'phone_number' => '+27837542932',
+        'parameters' => ['Race Athlete', 'Race Day'],
+    ])
+        ->expectsOutput('Template key: supporter_invite')
+        ->expectsOutput('Template name: supporter_invite_prod')
+        ->expectsOutput('Language code: en')
+        ->expectsOutput('Phone number id: 123456789')
+        ->expectsOutput('Business account id: 987654321')
+        ->expectsOutput('Graph API URL: https://graph.facebook.com/v20.0/123456789/messages')
+        ->expectsOutput('Template sent.')
+        ->assertExitCode(0);
+
+    Http::assertSent(function ($request) {
+        return $request->url() === 'https://graph.facebook.com/v20.0/123456789/messages'
+            && $request->hasHeader('Authorization', 'Bearer test-token')
+            && $request['template']['name'] === 'supporter_invite_prod'
+            && $request['template']['language']['code'] === 'en'
+            && $request['template']['components'][0]['parameters'][0]['text'] === 'Race Athlete';
     });
 });
 

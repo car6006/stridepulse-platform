@@ -26,6 +26,7 @@ class SendWhatsAppMessage implements ShouldQueue
 
         $token = config('services.whatsapp.token');
         $phoneNumberId = config('services.whatsapp.phone_number_id');
+        $businessAccountId = config('services.whatsapp.business_account_id');
 
         if (blank($token)) {
             Log::warning('WhatsApp outbound dispatch missing API token', [
@@ -69,23 +70,36 @@ class SendWhatsAppMessage implements ShouldQueue
             ],
         ];
 
+        $graphApiUrl = "https://graph.facebook.com/v20.0/{$phoneNumberId}/messages";
+        $templateName = data_get($payload, 'template.name');
+        $languageCode = data_get($payload, 'template.language.code');
+
         $dispatch->increment('attempts');
 
         Log::info('WhatsApp outbound dispatch sending', [
             'dispatch_id' => $dispatch->id,
             'dedupe_key' => $dispatch->dedupe_key,
             'phone_number' => $dispatch->phone_number,
-            'template_name' => $dispatch->template_name,
+            'template_name' => $templateName ?? $dispatch->template_name,
+            'language_code' => $languageCode,
             'phone_number_id' => $phoneNumberId,
+            'business_account_id' => $businessAccountId,
+            'graph_api_url' => $graphApiUrl,
+            'payload' => $payload,
         ]);
 
         $response = Http::withToken($token)
             ->acceptJson()
-            ->post("https://graph.facebook.com/v20.0/{$phoneNumberId}/messages", $payload);
+            ->post($graphApiUrl, $payload);
 
         Log::info('WhatsApp outbound dispatch response received', [
             'dispatch_id' => $dispatch->id,
             'dedupe_key' => $dispatch->dedupe_key,
+            'template_name' => $templateName ?? $dispatch->template_name,
+            'language_code' => $languageCode,
+            'phone_number_id' => $phoneNumberId,
+            'business_account_id' => $businessAccountId,
+            'graph_api_url' => $graphApiUrl,
             'status_code' => $response->status(),
             'successful' => $response->successful(),
         ]);

@@ -10,6 +10,8 @@ use App\Models\WhatsAppMessageDispatch;
 
 class WhatsAppDispatchService
 {
+    public function __construct(private WhatsAppTemplateRegistry $templates) {}
+
     public function sendText(
         string $phoneNumber,
         string $body,
@@ -49,32 +51,15 @@ class WhatsAppDispatchService
 
     public function sendTemplate(
         string $phoneNumber,
-        string $templateName,
+        string $templateKey,
         string $dedupeKey,
         array $parameters = [],
         ?WhatsAppConversation $conversation = null,
         ?TrackingSession $trackingSession = null,
         ?Event $event = null,
     ): WhatsAppMessageDispatch {
-        $payload = [
-            'messaging_product' => 'whatsapp',
-            'to' => $phoneNumber,
-            'type' => 'template',
-            'template' => [
-                'name' => $templateName,
-                'language' => ['code' => config('services.whatsapp.language', 'en_US')],
-            ],
-        ];
-
-        if ($parameters !== []) {
-            $payload['template']['components'] = [[
-                'type' => 'body',
-                'parameters' => array_map(fn ($value) => [
-                    'type' => 'text',
-                    'text' => (string) $value,
-                ], $parameters),
-            ]];
-        }
+        $payload = $this->templates->payload($templateKey, $phoneNumber, $parameters);
+        $templateName = data_get($payload, 'template.name');
 
         $dispatch = WhatsAppMessageDispatch::query()->firstOrCreate(
             ['dedupe_key' => $dedupeKey],

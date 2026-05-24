@@ -1,5 +1,6 @@
 <?php
 
+use App\Services\OperationsHealthService;
 use App\Services\WhatsAppTemplateRegistry;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -67,3 +68,25 @@ Artisan::command('whatsapp:test-template {template_key} {phone_number} {paramete
 
     return 1;
 })->purpose('Send a configured WhatsApp template directly through the Cloud API');
+
+Artisan::command('stridepulse:health', function () {
+    /** @var OperationsHealthService $health */
+    $health = app(OperationsHealthService::class);
+    $summary = $health->summary();
+
+    $this->line('StridePulse health');
+    $this->line('WhatsApp config: '.$summary['whatsapp']['api_config_status']['label']);
+    $this->line('WhatsApp token configured: '.($summary['whatsapp']['token_configured'] ? 'yes' : 'no'));
+    $this->line('WhatsApp phone number id configured: '.($summary['whatsapp']['phone_number_id_configured'] ? 'yes' : 'no'));
+    $this->line('WhatsApp business account id configured: '.($summary['whatsapp']['business_account_id_configured'] ? 'yes' : 'no'));
+    $this->line('Queue pending jobs: '.$summary['queue']['pending_jobs_count']);
+    $this->line('Queue failed jobs: '.$summary['queue']['failed_jobs_count']);
+    $this->line('Last inbound WhatsApp: '.($summary['whatsapp']['latest_inbound_message']?->received_at?->toIso8601String() ?? 'none'));
+    $this->line('Last outbound WhatsApp: '.($summary['whatsapp']['latest_outbound_dispatch']?->updated_at?->toIso8601String() ?? 'none'));
+    $this->line('Garmin last discovery: '.($summary['garmin']['latest_device_heartbeat']?->last_seen_at?->toIso8601String() ?? 'none'));
+    $this->line('Garmin last telemetry: '.($summary['garmin']['latest_telemetry_point']?->recorded_at?->toIso8601String() ?? 'none'));
+    $this->line('Active sessions: '.$summary['garmin']['active_sessions_count']);
+    $this->line('Unclaimed devices: '.$summary['garmin']['unclaimed_devices_count']);
+
+    return 0;
+})->purpose('Show StridePulse operational health summary');

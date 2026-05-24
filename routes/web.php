@@ -5,6 +5,7 @@ use App\Http\Controllers\DeviceController;
 use App\Http\Controllers\GarminSetupController;
 use App\Http\Controllers\LiveSessionController;
 use App\Http\Controllers\LiveSessionsController;
+use App\Http\Controllers\OperationsController;
 use App\Http\Controllers\TrackingSessionWebController;
 use Illuminate\Support\Facades\Route;
 
@@ -12,7 +13,8 @@ Route::view('/', 'welcome')->name('home');
 Route::get('/live/{session_token}', [LiveSessionController::class, 'show'])->name('live.session');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::view('dashboard', 'dashboard')->name('dashboard');
+    Route::get('dashboard', [OperationsController::class, 'dashboard'])->name('dashboard');
+    Route::get('operations/logs', [OperationsController::class, 'logs'])->name('operations.logs');
     Route::resource('athletes', AthleteController::class)->except(['show']);
     Route::get('devices/unclaimed', [DeviceController::class, 'unclaimed'])->name('devices.unclaimed');
     Route::post('devices/{device}/claim', [DeviceController::class, 'claim'])->name('devices.claim');

@@ -33,6 +33,9 @@
                     <flux:sidebar.item icon="layout-grid" :href="route('live-sessions.index')" :current="request()->routeIs('live-sessions.*')" wire:navigate>
                         {{ __('Live sessions') }}
                     </flux:sidebar.item>
+                    <flux:sidebar.item icon="layout-grid" :href="route('operations.logs')" :current="request()->routeIs('operations.*')" wire:navigate>
+                        {{ __('Operations') }}
+                    </flux:sidebar.item>
                 </flux:sidebar.group>
             </flux:sidebar.nav>
 
